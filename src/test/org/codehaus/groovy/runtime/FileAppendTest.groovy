@@ -200,6 +200,37 @@ class FileAppendTest extends GroovyTestCase {
 		expected += text
 		assert hasContents(file, expected)
 	}
+	
+	void testByteArrayAppend() {
+		def total = []
+
+		def array = [0x0,0x1,0x2] 
+		total.addAll array
+		file.append array as byte[]
+		assert hasContents(file, total)
+
+		array = [0x3,0x4] 
+		total.addAll array
+		file.append array as byte[]
+		assert hasContents( file, total )
+	}
+
+	void testBinaryAppend() {
+		def total = []
+
+		def array = [0x0,0x1,0x2] 
+		total.addAll array
+
+		file.append new ByteArrayInputStream( array as byte[] )
+		assert hasContents( file, total )
+
+		//test leftShift here as well, which should simply be an alias for 'append'
+
+		array = [0x5,0x6,0x7,0x8]
+		total.addAll array
+		file << new ByteArrayInputStream( array as byte[] )
+		assert hasContents( file, total )
+	}
 
 	boolean hasContents(File f, String expected)
 	{
@@ -207,8 +238,23 @@ class FileAppendTest extends GroovyTestCase {
 		// read contents the Java way
 		char[] cbuf = new char[expected.length()];
 		def fileReader = new FileReader(file)
-		fileReader.read(cbuf)
-		return expected == String.valueOf(cbuf)
+		try {
+			fileReader.read(cbuf)
+			return expected == String.valueOf(cbuf)
+		}
+		finally { fileReader?.close() }
+	}
+
+	boolean hasContents(File f, List expected) // list of bytes
+	{
+		assert file.length() == expected.size()
+		byte[] buf = new byte[expected.size()];
+		def fis = new FileInputStream(file)
+		try {
+			fis.read(buf)
+			return (expected as byte[]) == buf
+		}
+		finally { fis?.close() }
 	}
 }
 

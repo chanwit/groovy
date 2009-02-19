@@ -29,7 +29,6 @@ import org.apache.tools.ant.types.Commandline;
 import org.apache.tools.ant.types.FileSet;
 import org.apache.tools.ant.types.Path;
 import org.apache.tools.ant.types.Reference;
-import org.apache.tools.ant.types.Environment;
 import org.apache.tools.ant.util.FileUtils;
 import org.codehaus.groovy.control.CompilationFailedException;
 import org.codehaus.groovy.control.CompilerConfiguration;
@@ -37,7 +36,16 @@ import org.codehaus.groovy.runtime.DefaultGroovyMethods;
 import org.codehaus.groovy.runtime.InvokerHelper;
 import org.codehaus.groovy.tools.ErrorReporter;
 
-import java.io.*;
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.Reader;
+import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.util.Vector;
 
@@ -404,8 +412,9 @@ public class Groovy extends Java {
             } else {
                 script = shell.parse(txt, scriptName);
             }
+            final Project project = getProject();
             script.setProperty("ant", builder);
-            script.setProperty("project", getProject());
+            script.setProperty("project", project);
             script.setProperty("properties", new AntProjectPropertiesDelegate(project));
             script.setProperty("target", getOwningTarget());
             script.setProperty("task", this);
@@ -500,7 +509,8 @@ public class Groovy extends Java {
 
     private void createNewArgs(String txt) throws IOException {
         final String[] args = cmdline.getCommandline();
-        final File tempFile = FileUtils.getFileUtils().createTempFile(PREFIX, SUFFIX, null, true);
+        // Temporary file - delete on exit, create (assured unique name).
+        final File tempFile = FileUtils.getFileUtils().createTempFile(PREFIX, SUFFIX, null, true, true);
         final String[] commandline = new String[args.length + 1];
         DefaultGroovyMethods.write(tempFile, txt);
         commandline[0] = tempFile.getCanonicalPath();

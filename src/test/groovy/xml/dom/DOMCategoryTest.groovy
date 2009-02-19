@@ -10,7 +10,7 @@ class DOMCategoryTest extends GroovyTestCase {
     def getRoot = { xml ->
         def reader = new StringReader(xml)
         def doc    = DOMBuilder.parse(reader)
-        def root   = doc.documentElement
+        doc.documentElement
     }
 
     void testMixedMarkup() {
@@ -70,6 +70,45 @@ class DOMCategoryTest extends GroovyTestCase {
         use(DOMCategory) {
             assert myFoo.get("bar") == 3
         }
+    }
+
+    /** Test for GROOVY-3109 */
+    void testAccessToUnknownPropertyInAScriptWithDomCategory() {
+        assertScript """
+            import groovy.xml.dom.DOMCategory
+
+            try {
+                use(DOMCategory) {
+                    test
+                }
+                assert false
+            } catch (MissingPropertyException e) {
+                assert 'test' == e.property
+            }
+        """
+    }
+
+    /** Test for GROOVY-3109 */
+    void testAccessToUnknownPropertyInAClassWithDomCategory() {
+        assertScript """
+            import groovy.xml.dom.DOMCategory
+
+            class MyClass {
+                static boolean run() {
+                    try {
+                        use (DOMCategory) {
+                            println test
+                        }
+                        return false
+                    } catch (MissingPropertyException e) {
+                        assert 'test' == e.property
+                        return true
+                    }
+                }
+            }
+
+            assert true == MyClass.run()
+        """
     }
 }
 

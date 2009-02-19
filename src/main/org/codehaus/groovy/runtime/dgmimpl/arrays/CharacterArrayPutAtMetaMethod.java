@@ -15,12 +15,14 @@
  */
 package org.codehaus.groovy.runtime.dgmimpl.arrays;
 
+import groovy.lang.GString;
 import groovy.lang.MetaClassImpl;
 import groovy.lang.MetaMethod;
 import org.codehaus.groovy.reflection.CachedClass;
 import org.codehaus.groovy.reflection.ReflectionCache;
 import org.codehaus.groovy.runtime.callsite.CallSite;
 import org.codehaus.groovy.runtime.callsite.PojoMetaMethodSite;
+import org.codehaus.groovy.runtime.typehandling.DefaultTypeTransformation;
 
 public class CharacterArrayPutAtMetaMethod extends ArrayPutAtMetaMethod {
         private static final CachedClass OBJECT_CLASS = ReflectionCache.OBJECT_CLASS;
@@ -38,7 +40,7 @@ public class CharacterArrayPutAtMetaMethod extends ArrayPutAtMetaMethod {
         public Object invoke(Object object, Object[] args) {
             final char[] objects = (char[]) object;
             final int index = normaliseIndex(((Integer) args[0]).intValue(), objects.length);
-            objects[index] = ((Character)args[1]).charValue();
+            objects[index] = DefaultTypeTransformation.getCharFromSizeOneString(args[1]).charValue();
             return null;
         }
 
@@ -54,7 +56,7 @@ public class CharacterArrayPutAtMetaMethod extends ArrayPutAtMetaMethod {
             super(site, metaClass, metaMethod, params);
         }
 
-        public Object call(Object receiver, Object[] args) {
+        public Object call(Object receiver, Object[] args) throws Throwable {
             if ((receiver instanceof char[] && args[0] instanceof Integer && args[1] instanceof Character )
                     && checkPojoMetaClass()) {
                 final char[] objects = (char[]) receiver;

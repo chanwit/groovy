@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2007 the original author or authors.
+ * Copyright 2003-2009 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,28 @@ import groovy.xml.streamingmarkupsupport.AbstractStreamingBuilder
 import groovy.xml.streamingmarkupsupport.StreamingMarkupWriter
 import groovy.xml.streamingmarkupsupport.BaseMarkupBuilder
 
+/**
+ * <p>A builder class for creating XML markup.  This implementation uses a 
+ * {@link groovy.lang.Writer} to handle output.</p>
+ * 
+ * <p>Example:</p>
+ * <pre>new StreamingMarkupBuilder().bind {
+ *   root {
+ *     a( a1:'one' ) {
+ *       b { mkp.yield( '3 < 5' ) }
+ *       c( a2:'two', 'blah' )
+ *     }
+ *   }
+ * }.toString()</pre>
+ * Will return the following String, without newlines or indentation:  
+ * <pre>&lt;root&gt;
+ *   &lt;a a1='one'&gt;
+ *     &lt;b&gt;3 &amp;lt; 5&lt;/b&gt;
+ *     &lt;c a2='two'&gt;blah&lt;/c&gt;
+ *   &lt;/a&gt;
+ * &lt;/root&gt;</pre> 
+ *
+ */
 class StreamingMarkupBuilder extends AbstractStreamingBuilder {
     def pendingStack = []
     def commentClosure = {doc, pendingNamespaces, namespaces, namespaceSpecificTags, prefix, attrs, body, out ->
@@ -118,7 +140,6 @@ class StreamingMarkupBuilder extends AbstractStreamingBuilder {
             body.each {
                 if (it instanceof Closure) {
                     def body1 = it.clone()
-
                     body1.delegate = doc
                     body1(doc)
                 } else if (it instanceof Buildable) {
@@ -146,11 +167,12 @@ class StreamingMarkupBuilder extends AbstractStreamingBuilder {
     def builder = null
 
     StreamingMarkupBuilder() {
-        specialTags.putAll(['yield': noopClosure,
-        'yieldUnescaped': unescapedClosure,
-        'xmlDeclaration': declarationClosure,
-        'comment': commentClosure,
-        'pi': piClosure])
+        specialTags.putAll(
+                ['yield': noopClosure,
+                'yieldUnescaped': unescapedClosure,
+                'xmlDeclaration': declarationClosure,
+                'comment': commentClosure,
+                'pi': piClosure])
 
         def nsSpecificTags = [':': [tagClosure, tagClosure, [:]], // the default namespace
         'http://www.w3.org/XML/1998/namespace': [tagClosure, tagClosure, [:]],
@@ -161,6 +183,20 @@ class StreamingMarkupBuilder extends AbstractStreamingBuilder {
 
     def encoding = null
 
+    /**
+     * <p>Returns a {@link Writable} object, which may be used to render
+     * the markup directly to a String, or send the output to a stream.</p>
+     * <p>Examples:</p>
+     * <pre>
+     * // get the markup as a string:
+     * new StreamingMarkupBuilder.bind { div { out << "hello world" } }.toString()
+     * 
+     * // send the output directly to a file:
+     * new StreamingMarkupBuilder.bind { div { out << "hello world" } } \
+     * 	 .writeTo( new File('myFile.xml').newWriter() )
+     * </pre>
+     * @return a {@link Writable} to render the markup
+     */
     public bind(closure) {
         def boundClosure = this.builder.bind(closure);
         def enc = encoding; // take a snapshot of the encoding when the closure is bound to the builder

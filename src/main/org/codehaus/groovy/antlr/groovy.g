@@ -9,6 +9,7 @@ import antlr.InputBuffer;
 import antlr.LexerSharedInputState;
 import antlr.CommonToken;
 import org.codehaus.groovy.GroovyBugError;
+import antlr.TokenStreamRecognitionException;
 }
 
 /** JSR-241 Groovy Recognizer
@@ -204,7 +205,6 @@ options {
     codeGenBitsetTestThreshold = 3;
     defaultErrorHandler = false;      // Don't generate parser error handlers
     buildAST = true;
-//  ASTLabelType = "GroovyAST";
 }
 
 tokens {
@@ -266,11 +266,7 @@ tokens {
      *
      * todo - change antlr.ASTFactory to do this instead...
      */
-    public AST create(int type, String txt, Token first, Token last) {
-        return create(type, txt, astFactory.create(first), last);
-    }
-    
-    public AST create(int type, String txt, AST first, Token last) {
+    public AST create(int type, String txt, AST first) {
         AST t = astFactory.create(type,txt);
         if ( t != null && first != null) {
             // first copy details from first token
@@ -278,14 +274,31 @@ tokens {
             // then ensure that type and txt are specific to this new node
             t.initialize(type,txt);
         }
-
-        if ((t instanceof GroovySourceAST) && last != null) {
+        return t;
+    }
+    
+    private AST attachLast(AST t, Object last) {
+    	if ((t instanceof GroovySourceAST) && (last instanceof SourceInfo)) {
+            SourceInfo lastInfo = (SourceInfo) last;
             GroovySourceAST node = (GroovySourceAST)t;
-            node.setLast(last);
+            node.setColumnLast(lastInfo.getColumn());
+            node.setLineLast(lastInfo.getLine());
             // This is a good point to call node.setSnippet(),
             // but it bulks up the AST too much for production code.
         }
         return t;
+    }
+     
+    public AST create(int type, String txt, Token first, Token last) {
+        return attachLast(create(type, txt, astFactory.create(first)), last);
+    }
+    
+    public AST create(int type, String txt, AST first, Token last) {
+        return attachLast(create(type, txt, first), last);
+    }
+    
+    public AST create(int type, String txt, AST first, AST last) {
+        return attachLast(create(type, txt, first), last);
     }
     
     /** 
@@ -315,11 +328,22 @@ tokens {
     public void requireFailed(String problem, String solution) throws SemanticException {
         // TODO: Needs more work.
         Token lt = null;
-        try { lt = LT(1); }
-        catch (TokenStreamException ee) { }
-        if (lt == null)  lt = Token.badToken;
+        int lineNum = Token.badToken.getLine(), colNum = Token.badToken.getColumn();
+        try { 
+            lt = LT(1);
+            if(lt != null) {
+                lineNum = lt.getLine();
+                colNum = lt.getColumn();
+            }
+        }
+        catch (TokenStreamException ee) {
+            if(ee instanceof TokenStreamRecognitionException) {
+                lineNum = ((TokenStreamRecognitionException) ee).recog.getLine();
+                colNum = ((TokenStreamRecognitionException) ee).recog.getColumn();
+            }
+        }
         throw new SemanticException(problem + ";\n   solution: " + solution,
-                                    getFilename(), lt.getLine(), lt.getColumn());
+                                    getFilename(), lineNum, colNum);
     }
 
     public void addWarning(String warning, String solution) {
@@ -343,6 +367,32 @@ tokens {
         if (!z)  requireFailed(problem, solution);
     }
 
+    private boolean matchGenericTypeBrackets(boolean z, String problem, String solution) throws SemanticException {
+        if (!z)  matchGenericTypeBracketsFailed(problem, solution);
+        return z;
+    }
+
+    public void matchGenericTypeBracketsFailed(String problem, String solution) throws SemanticException {
+        Token lt = null;
+        int lineNum = Token.badToken.getLine(), colNum = Token.badToken.getColumn();
+        
+        try { 
+            lt = LT(1);
+            if(lt != null) {
+                lineNum = lt.getLine();
+                colNum = lt.getColumn();
+            }
+        }
+        catch (TokenStreamException ee) {
+            if(ee instanceof TokenStreamRecognitionException) {
+                lineNum = ((TokenStreamRecognitionException) ee).recog.getLine();
+                colNum = ((TokenStreamRecognitionException) ee).recog.getColumn();
+            }
+        }
+        
+        throw new SemanticException(problem + ";\n   solution: " + solution,
+                                    getFilename(), lineNum, colNum);
+   }
 
     // Query a name token to see if it begins with a capital letter.
     // This is used to tell the difference (w/o symbol table access) between {String x} and {println x}.
@@ -497,7 +547,7 @@ declaration!
         v2:variableDefinitions[null,#t2]
         {#declaration = #v2;}
     ;
-
+    
 genericMethod!
     :
         // method using a 'def' or a modifier; type is optional
@@ -565,7 +615,7 @@ singleDeclaration
  *  just put a TODO comment in.
  */
 declarationStart!
-    :   (     "def" nls
+    :   (     ("def" nls) 
             | modifier nls
             | annotation nls
             | (   upperCaseIdent
@@ -715,7 +765,8 @@ int currentLtLevel = 0;}
 
         // make sure we have gobbled up enough '>' characters
         // if we are at the "top level" of nested typeArgument productions
-        {(currentLtLevel != 0) || ltCounter == currentLtLevel}?
+        {matchGenericTypeBrackets(((currentLtLevel != 0) || ltCounter == currentLtLevel),
+        "Missing closing bracket '>' for generics types", "Please specify the missing bracket!")}?
 
         {#typeArguments = #(create(TYPE_ARGUMENTS, "TYPE_ARGUMENTS",first,LT(1)), #typeArguments);}
     ;
@@ -877,7 +928,7 @@ modifier
     ;
 
 annotation!  {Token first = LT(1);}
-    :   AT! i:identifier nls! ( LPAREN! ( args:annotationArguments )? RPAREN! )?
+    :   AT! i:identifier nls! (options{greedy=true;}: LPAREN! ( args:annotationArguments )? RPAREN! )?
         {#annotation = #(create(ANNOTATION,"ANNOTATION",first,LT(1)), i, args);}
     ;
 
@@ -1031,7 +1082,8 @@ typeParameters
 
         // make sure we have gobbled up enough '>' characters
         // if we are at the "top level" of nested typeArgument productions
-        {(currentLtLevel != 0) || ltCounter == currentLtLevel}?
+        {matchGenericTypeBrackets(((currentLtLevel != 0) || ltCounter == currentLtLevel),
+        "Missing closing bracket '>' for generics types", "Please specify the missing bracket!")}?
 
         {#typeParameters = #(create(TYPE_PARAMETERS, "TYPE_PARAMETERS",first,LT(1)), #typeParameters);}
     ;
@@ -1238,10 +1290,13 @@ classField!  {Token first = LT(1);}
         dg:genericMethod
         {#classField = #dg;}
     |
+        (multipleAssignmentDeclarationStart)=> 
+        mad:multipleAssignmentDeclaration
+        {#classField = #mad;}
+    |    
         (declarationStart)=>
         dd:declaration
         {#classField = #dd;}
-
     |
         //TODO - unify typeDeclaration and typeDefinitionInternal names
         // type declaration
@@ -1311,6 +1366,32 @@ listOfVariables[AST mods, AST t, Token first]
                                getASTFactory().dupTree(t),first]
         )*
     ;
+    
+multipleAssignmentDeclarationStart 
+    :
+        (modifier nls | annotation nls)* "def" nls LPAREN
+    ;
+    
+typeNamePairs[AST mods, Token first]
+    :
+        (t:typeSpec[false]!)?
+        singleVariable[getASTFactory().dupTree(mods),#t]
+        (   COMMA! nls!
+            {first = LT(1);}
+            (tn:typeSpec[false]!)?
+            singleVariable[getASTFactory().dupTree(mods),#tn]
+        )*
+    ;    
+    
+multipleAssignmentDeclaration {Token first = cloneToken(LT(1));}
+    :  
+        mods:modifiers!
+        (t:typeSpec[false]!)?
+        LPAREN^ nls! typeNamePairs[#mods,first] RPAREN!
+        ASSIGN^ nls!
+        assignmentExpression[0]
+        {#multipleAssignmentDeclaration=#(create(VARIABLE_DEF,"VARIABLE_DEF",first,LT(1)), #mods, #(create(TYPE,"TYPE",first,LT(1)),#t), #multipleAssignmentDeclaration);}
+    ;    
 
 /** The tail of a declaration.
   * Either v1, v2, ... (with possible initializers) or else m(args){body}.
@@ -1320,7 +1401,7 @@ listOfVariables[AST mods, AST t, Token first]
   * Otherwise, the variable type defaults to 'any'.
   * DECIDE:  Method return types default to the type of the method body, as an expression.
   */
-variableDefinitions[AST mods, AST t]  {Token first = cloneToken(LT(1));
+variableDefinitions[AST mods, AST t] {Token first = cloneToken(LT(1));
                        if (mods != null) {
                            first.setLine(mods.getLine());
                            first.setColumn(mods.getColumn());
@@ -1661,21 +1742,23 @@ statement[int prevToken]
 {boolean sce=false; Token first = LT(1); AST casesGroup_AST = null;}
     // prevToken is NLS if previous statement is separated only by a newline
 
-    :   (genericMethodStart)=>
+    :  (genericMethodStart)=>
         genericMethod
 
-
+    |  (multipleAssignmentDeclarationStart)=> 
+        multipleAssignmentDeclaration
+        
     // declarations are ambiguous with "ID DOT" relative to expression
     // statements. Must backtrack to be sure. Could use a semantic
     // predicate to test symbol table to see what the type was coming
     // up, but that's pretty hard without a symbol table ;)
-    |   (declarationStart)=>
+    |  (declarationStart)=>
         declaration
 
     // Attach a label to the front of a statement
     // This block is executed for effect, unless it has an explicit closure argument.
     |
-        (IDENT COLON)=>
+       (IDENT COLON)=>
         pfx:statementLabelPrefix!
         {#statement = #pfx;}  // nest it all under the label prefix
         (   (LCURLY) => openOrClosableBlock
@@ -2126,16 +2209,21 @@ commandArgument
 // in contexts where we know we have an expression.  It allows general Java-type expressions.
 expression[int lc_stmt]
     :   
-        (LBRACK nls IDENT (COMMA IDENT)* RBRACK ASSIGN) =>
+        (LPAREN typeSpec[true] RPAREN expression[lc_stmt])=>
+            lp:LPAREN^ {#lp.setType(TYPECAST);} typeSpec[true] RPAREN!
+            expression[lc_stmt]
+    |        
+       (LPAREN nls IDENT (COMMA nls IDENT)* RPAREN ASSIGN) =>
         m:multipleAssignment[lc_stmt] {#expression=#m;}
     |   assignmentExpression[lc_stmt]
     ;
 
 multipleAssignment[int lc_stmt] {Token first = cloneToken(LT(1));}
-    :   LBRACK^ nls! listOfVariables[null,null,first] RBRACK!
+    :   LPAREN^ nls! listOfVariables[null,null,first] RPAREN!
         ASSIGN^ nls!
         assignmentExpression[lc_stmt]
     ;
+
 
 // This is a list of expressions.
 // Used for backward compatibility, in a few places where
@@ -2777,14 +2865,17 @@ stringConstructorValuePart
 // the arguments are all labeled (or SPREAD_MAP_ARG) or all unlabeled (and not SPREAD_MAP_ARG).
 listOrMapConstructorExpression
         { boolean hasLabels = false; }
-    :   lcon:LBRACK^
-        argList                 { hasLabels |= argListHasLabels;  }  // any argument label implies a map
+    :   lcon:LBRACK!
+        args:argList                 { hasLabels |= argListHasLabels;  }  // any argument label implies a map
         RBRACK!
-        { #lcon.setType(hasLabels ? MAP_CONSTRUCTOR : LIST_CONSTRUCTOR); }
+        {   int type = hasLabels ? MAP_CONSTRUCTOR : LIST_CONSTRUCTOR;
+        	#listOrMapConstructorExpression = #(create(type,"[",lcon,LT(1)),args); 
+        }
     |
         /* Special case:  [:] is an empty map constructor. */
         emcon:LBRACK^ COLON! RBRACK!   {#emcon.setType(MAP_CONSTRUCTOR);}
     ;
+
 
 /*OBS*
 /** Match a, a.b.c refs, a.b.c(...) refs, a.b.c[], a.b.c[].class,
@@ -3185,21 +3276,15 @@ options {
     protected ArrayList parenLevelStack = new ArrayList();
     protected int lastSigTokenType = EOF;  // last returned non-whitespace token
 
-    public void setTokenObjectClass(String name) {
-        // we overwrite this  method here, because we want to force the usage
-        // of our token class from our package through our class loader. 
-        // It must be our claassloader, because for OSGI environments the class
-        // may not be accessible otherwise.
-        if (CommonToken.class.getName().equals(name)) {
-            tokenObjectClass = CommonToken.class;
-        } else {
-            throw new GroovyBugError(
-                "We forced setTokenObjectClass to use only "+
-                CommonToken.class.getName()+". "+name+
-                " is not supported!\nIf you need "+
-                "a different class, please first change "+
-                "setTokenObjectClass(String) in groovy.g");
-        }
+    public void setTokenObjectClass(String name) {/*ignore*/}
+    
+    protected Token makeToken(int t) {
+        GroovySourceToken tok = new GroovySourceToken(t);
+        tok.setColumn(inputState.getTokenStartColumn());
+        tok.setLine(inputState.getTokenStartLine());
+        tok.setColumnLast(inputState.getColumn());
+        tok.setLineLast(inputState.getLine());
+        return tok;
     }
     
     protected void pushParenLevel() {
@@ -3207,6 +3292,7 @@ options {
         parenLevel = 0;
         stringCtorState = 0;
     }
+    
     protected void popParenLevel() {
         int npl = parenLevelStack.size();
         if (npl == 0)  return;

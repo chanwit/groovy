@@ -21,12 +21,13 @@ public interface GroovyClassDoc extends GroovyType, GroovyProgramElementDoc{
     boolean definesSerializableFields();
     GroovyFieldDoc[] enumConstants();
     GroovyFieldDoc[] fields();
+    GroovyFieldDoc[] properties();
     GroovyFieldDoc[] fields(boolean filter);
     GroovyClassDoc findClass(String className);
     GroovyClassDoc[] importedClasses();
     GroovyPackageDoc[] importedPackages();
-    GroovyClassDoc[] innerClasses(); // not supported in groovy
-    GroovyClassDoc[] innerClasses(boolean filter); // not supported in groovy
+    GroovyClassDoc[] innerClasses();
+    GroovyClassDoc[] innerClasses(boolean filter);
     GroovyClassDoc[] interfaces();
     GroovyType[] interfaceTypes();
     boolean isAbstract();

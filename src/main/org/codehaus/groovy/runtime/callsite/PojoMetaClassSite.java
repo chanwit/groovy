@@ -15,7 +15,12 @@
  */
 package org.codehaus.groovy.runtime.callsite;
 
+import org.codehaus.groovy.runtime.ScriptBytecodeAdapter;
+
+import groovy.lang.GroovyRuntimeException;
+import groovy.lang.GroovySystem;
 import groovy.lang.MetaClass;
+import groovy.lang.ProxyMetaClass;
 
 /**
  * POJO call site
@@ -29,11 +34,22 @@ public class PojoMetaClassSite extends MetaClassSite{
         super(site, metaClass);
     }
 
-    public Object call(Object receiver, Object[] args) {
-        if(checkCall(receiver))
-          return metaClass.invokeMethod(receiver, name, args);
-        else
+    public Object call(Object receiver, Object[] args) throws Throwable {
+        if(checkCall(receiver)) {
+          try{
+        	  MetaClass metaClassToInvoke = metaClass;
+        	  // if it is ProxyMetaClass, use the one from the registry and not the cached one
+        	  // as the mock/stub infrastructure replaces metaClass at runtime in the context of use {..}
+        	  if(metaClass instanceof ProxyMetaClass) {
+        		  metaClassToInvoke = GroovySystem.getMetaClassRegistry().getMetaClass(receiver.getClass()); 
+        	  }
+        	  return metaClassToInvoke.invokeMethod(receiver, name, args);
+          } catch (GroovyRuntimeException gre) {
+              throw ScriptBytecodeAdapter.unwrap(gre);
+          }
+        } else {
           return CallSiteArray.defaultCall(this, receiver, args);
+        }
     }
 
     protected final boolean checkCall(Object receiver) {

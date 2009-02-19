@@ -17,15 +17,15 @@ package org.codehaus.groovy.transform.vm5
 
 /**
  * @author Danno.Ferrin
+ * @author Alex Tkachman
  */
-class GlobalTransformTest extends GroovyTestCase {
+class GlobalTransformTest extends GroovyShellTestCase {
 
     URL transformRoot = new File(getClass().classLoader.
             getResource("org/codehaus/groovy/transform/vm5/META-INF/services/org.codehaus.groovy.transform.ASTTransformation").
             toURI()).parentFile.parentFile.parentFile.toURL()
 
     void testGlobalTransform() {
-        GroovyShell shell = new GroovyShell()
         shell.classLoader.addURL(transformRoot)
         shell.evaluate("""
             import org.codehaus.groovy.control.CompilePhase
@@ -39,5 +39,4 @@ class GlobalTransformTest extends GroovyTestCase {
             }
         """)
     }
-
 }

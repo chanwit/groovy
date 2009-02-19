@@ -89,10 +89,11 @@ public class InspectorTest extends MockObjectTestCase implements Serializable {
         String[] names = {"sleep", "sleep", "println", "println", "println", "find", "print", "print", "each", "invokeMethod", "asType",
                 "inspect", "is", "isCase", "identity", "getAt", "putAt", "dump", "getMetaPropertyValues", "getProperties",
                 "use", "use", "use", "printf", "printf", "eachWithIndex", "every", "every", "any", "any", "grep", "collect", "collect", "findAll",
-                "findIndexOf", "findIndexOf", "findLastIndexOf", "findLastIndexOf", "findIndexValues", "findIndexValues",
-                "iterator", "addShutdownHook", "sprintf", "sprintf", "with", "inject", "getMetaClass", "setMetaClass", "metaClass", "respondsTo"
+                "split", "findIndexOf", "findIndexOf", "findLastIndexOf", "findLastIndexOf", "findIndexValues", "findIndexValues",
+                "iterator", "addShutdownHook", "sprintf", "sprintf", "with", "inject", "getMetaClass", "setMetaClass", "metaClass", "respondsTo",
+                "toString"
         };
-        assertEquals(names.length, metaMethods.length);
+        assertEquals("Incorrect number of methods found examining: " + getNamesFor(metaMethods), names.length, metaMethods.length);
         assertNameEquals(names, metaMethods);
         String[] details = {"GROOVY", "public", "Object", "void", "println", "Object", "n/a"};
         assertContains(metaMethods, details);
@@ -202,6 +203,15 @@ public class InspectorTest extends MockObjectTestCase implements Serializable {
         assertEquals("0:\ta b " + ls + "1:\tx y " + ls, bytes.toString());
         // just for coverage, print to System.out (yuck)
         Inspector.print(memberInfo);
+    }
+
+    private List getNamesFor(Object[] metaMethods) {
+        List result = new ArrayList();
+        for (int i = 0; i < metaMethods.length; i++) {
+            String[] strings = (String[]) metaMethods[i];
+            result.add(strings[Inspector.MEMBER_NAME_IDX]);
+        }
+        return result;
     }
 
     private void assertNameEquals(String[] names, Object[] metaMethods) {

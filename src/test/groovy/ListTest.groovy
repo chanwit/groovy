@@ -219,10 +219,11 @@ class ListTest extends GroovyTestCase {
         assert (b == a && a == [1, "foo", (short)3, 4L])
     }
 
+    // incorporates GROOVY-2904 and GROOVY-3102
     void testListFlatten() {
-        def orig = [[[4, 5, 6, [46, 7, "erer"]], 4, [3, 6, 78]], 4]
+        def orig = [[[4, 5, 6, [46, 7, "erer"]], null, 4, [3, 6, 78]], 4]
         def flat = orig.flatten()
-        assert flat == [4, 5, 6, 46, 7, "erer", 4, 3, 6, 78, 4]
+        assert flat == [4, 5, 6, 46, 7, "erer", null, 4, 3, 6, 78, 4]
     }
     
     void testSetFlatten() {
@@ -243,8 +244,9 @@ class ListTest extends GroovyTestCase {
         assert flat == ["o", "n", "e", "t", "w", "o"]
     }
 
+    // incorporates GROOVY-2904 and GROOVY-3102
     void testFlattenListWithSuppliedClosure() {
-        def orig = [[[4, 5, 6, [46, 7, "erer"]], 4, [3, 6, 78]], 4]
+        def orig = [[[4, 5, 6, [46, 7, "erer"]], null, 4, [3, 6, 78]], 4]
         def flat = orig.flatten{ it.iterator().toList() }
         assert flat == [4, 5, 6, 46, 7, "e", "r", "e", "r", 4, 3, 6, 78, 4]
     }
@@ -355,34 +357,20 @@ class ListTest extends GroovyTestCase {
         list[1,2] = [11,12]
         assert list == [0, 11, 12, 3 ]      , 'same length assignment'
         list = [0,1,2,3]
-        list[1,1] = [11]
-        assert list == [0, 11, 2, 3 ]       , 'length 1 assignment'
+        shouldFail (java.lang.IllegalArgumentException.class) {
+            list[1,1] = [11]
+        }
         list = [0,1,2,3]
-        list[1,0] = [ ]
-        assert list == [0, 1, 2, 3 ]        , 'length 0 assignment, empty splice'
-        // assignments at bounds
-        list = [0,1,2,3]
-        list[0,0] = [10]
-        assert list == [10, 1, 2, 3 ]       , 'left border assignment'
-        list = [0,1,2,3]
-        list[3,3] = [13]
-        assert list == [0, 1, 2, 13 ]       , 'right border assignment'
+        shouldFail (java.lang.IllegalArgumentException.class) {
+            list[1,0] = [ ]
+        }
         // assignments outside current bounds
         list = [0,1,2,3]
-        list[-1,-1] = [-1]
-        assert list == [0, 1, 2, -1]        , 'left of left border'
+        list[-1,-2] = [-1, -2]
+        assert list == [0, 1, -2, -1]        , 'left of left border'
         list = [0,1,2,3]
-        shouldFail (IndexOutOfBoundsException.class) {
-            list[3,4] = [3,4]
-            assert list == [0, 1, 2, 3, 4]
-        }
-        // structural changes
-        list = [0,1,2,3]
-        list[1,2] = ['x']
-        assert list == [0, 'x', 3]          , 'compacting'
-        list = [0,1,2,3]
-        list[1,2] = ['x','x','x']
-        assert list == [0, 'x','x','x', 3]  , 'extending'
+        list[3, 4] = [3, 4]
+        assert list == [0, 1, 2, 3, 4]
     }
 
     void testPutAtRange(){

@@ -290,6 +290,33 @@ class MixinTest extends GroovyTestCase {
         assertEquals 2, u.mixedIn[Set].size ()
         assertEquals 2, ((Set)u).size ()
     }
+
+    void testWPM () {
+
+        new WPM_B ().foo ()
+
+        WPM_C.metaClass { mixin WPM_B }
+
+        def c= new WPM_C()
+        c.foo()
+        c.foobar()
+    }
+
+    void testStackOverflow () {
+        Overflow_B.metaClass {
+            mixin Overflow_A
+
+            foo = {->
+                println 'New foo ' + receive('')
+            }
+        }
+
+        final Overflow_A a = new Overflow_A()
+        a.foo()
+
+        final Overflow_B b = new Overflow_B()
+        b.foo()
+    }
 }
 
 class ArrayListExt {
@@ -393,3 +420,37 @@ class NoDuplicateCollection {
           add obj
     }
 }
+
+class WPM_A  {
+
+  def final foo() {
+    bar() 
+  }
+
+  private final String bar() { return "Bar" }
+}
+
+class WPM_B extends WPM_A {
+  def foobar () {
+    super.foo ()
+  }
+}
+
+class WPM_C {}
+
+class Overflow_A {
+    public void foo() {
+        println 'Original foo ' + receive('')
+    }
+
+    protected Object receive() {
+        return "Message"
+    }
+
+    protected Object receive(Object param) {
+        receive() + param
+    }
+}
+
+class Overflow_B {}
+

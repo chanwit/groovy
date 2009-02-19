@@ -22,6 +22,7 @@ import groovy.lang.GroovyObjectSupport;
 import org.codehaus.groovy.ast.*;
 import org.codehaus.groovy.ast.expr.*;
 import org.codehaus.groovy.ast.stmt.*;
+import org.codehaus.groovy.runtime.MetaClassHelper;
 import org.codehaus.groovy.syntax.RuntimeParserException;
 import org.codehaus.groovy.syntax.Token;
 import org.codehaus.groovy.syntax.Types;
@@ -56,6 +57,9 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
     private static final Parameter[] GET_PROPERTY_PARAMS = new Parameter[]{
             new Parameter(ClassHelper.STRING_TYPE, "property")
     };
+    private static final Parameter[] SET_METACLASS_PARAMS = new Parameter[] {
+            new Parameter(ClassHelper.METACLASS_TYPE, "mc")
+    };
 
     private ClassNode classNode;
     private MethodNode methodNode;
@@ -68,6 +72,42 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         return methodNode;
     }
 
+    private FieldNode setMetaClassFieldIfNotExists(ClassNode node, FieldNode metaClassField){
+        if (metaClassField != null) return metaClassField;
+        final String classInternalName = BytecodeHelper.getClassInternalName(node);
+        metaClassField =
+            node.addField("metaClass", ACC_PRIVATE | ACC_TRANSIENT | ACC_SYNTHETIC, ClassHelper.METACLASS_TYPE, new BytecodeExpression() {
+                public void visit(MethodVisitor mv) {
+                    mv.visitVarInsn(ALOAD, 0);
+                    mv.visitInsn(DUP);
+                    mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "$getStaticMetaClass", "()Lgroovy/lang/MetaClass;");
+                    mv.visitFieldInsn(PUTFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
+                    mv.visitVarInsn(ALOAD, 0);
+                    mv.visitFieldInsn(GETFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
+                }
+
+                public ClassNode getType() {
+                    return ClassHelper.METACLASS_TYPE;
+                }
+            });
+        metaClassField.setSynthetic(true);
+        return metaClassField;
+    }
+    
+    private FieldNode getMetaClassField(ClassNode node) {
+        FieldNode ret = node.getDeclaredField("metaClass");
+        if (ret!=null) return ret;
+        ClassNode current = node;
+        while (current!=null && current!=ClassHelper.OBJECT_TYPE) {
+            current = current.getSuperClass();
+            ret = current.getDeclaredField("metaClass");
+            if (ret==null) continue;
+            if (Modifier.isPrivate(ret.getModifiers())) continue;
+            return ret;
+        }
+        return null;
+    }
+    
     /**
      * add code to implement GroovyObject
      * @param node
@@ -98,26 +138,23 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         addDefaultParameterMethods(node);
         addDefaultParameterConstructors(node);
 
-        String _myClassFieldName = "$myClass";
-        while (node.getField(_myClassFieldName) != null)
-          _myClassFieldName = _myClassFieldName + "$";
-        final String myClassFieldName = _myClassFieldName;
-
         final String classInternalName = BytecodeHelper.getClassInternalName(node);
 
-//        FieldNode myClassField = node.addField(myClassFieldName, ACC_PRIVATE|ACC_STATIC, ClassHelper.CLASS_Type, new ClassExpression(node));
-//        myClassField.setSynthetic(true);
-
         String _staticClassInfoFieldName = "$staticClassInfo";
-        while (node.getField(_staticClassInfoFieldName) != null)
+        while (node.getDeclaredField(_staticClassInfoFieldName) != null)
           _staticClassInfoFieldName = _staticClassInfoFieldName + "$";
         final String staticMetaClassFieldName = _staticClassInfoFieldName;
 
-        FieldNode staticMetaClassField = node.addField(staticMetaClassFieldName, ACC_PRIVATE|ACC_STATIC, ClassHelper.make(ClassInfo.class,false), null);
+        FieldNode staticMetaClassField = node.addField(staticMetaClassFieldName, ACC_PRIVATE|ACC_STATIC|ACC_SYNTHETIC, ClassHelper.make(ClassInfo.class,false), null);
         staticMetaClassField.setSynthetic(true);
 
-        List getStaticMetaClassCode = new LinkedList();
-        getStaticMetaClassCode.add( new BytecodeInstruction(){
+        node.addSyntheticMethod(
+            "$getStaticMetaClass",
+            ACC_PROTECTED,
+            ClassHelper.make(MetaClass.class),
+            Parameter.EMPTY_ARRAY,
+            ClassNode.EMPTY_ARRAY,
+            new BytecodeSequence(new BytecodeInstruction(){
             public void visit(MethodVisitor mv) {
                 mv.visitFieldInsn(GETSTATIC, classInternalName, staticMetaClassFieldName, "Lorg/codehaus/groovy/reflection/ClassInfo;");
                 mv.visitVarInsn(ASTORE, 1);
@@ -139,14 +176,7 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
                 mv.visitInsn(ARETURN);
 
             }
-        });
-        node.addSyntheticMethod(
-            "$getStaticMetaClass",
-            ACC_PROTECTED,
-            ClassHelper.make(MetaClass.class),
-            Parameter.EMPTY_ARRAY,
-            ClassNode.EMPTY_ARRAY,
-            new BytecodeSequence(getStaticMetaClassCode)
+        })
         );
 
         boolean knownSpecialCase =
@@ -156,33 +186,18 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
 
         if (!knownSpecialCase) {
 
-            boolean isGroovyObject = node.isDerivedFromGroovyObject();
-            if (!isGroovyObject) {
-                node.addInterface(ClassHelper.make(GroovyObject.class));
-            }
-
-            if (node.getField("metaClass") == null) {
-                FieldNode metaClassField =
-                        node.addField("metaClass", ACC_PRIVATE | ACC_TRANSIENT, ClassHelper.METACLASS_TYPE, new BytecodeExpression() {
-                            public void visit(MethodVisitor mv) {
-                                mv.visitVarInsn(ALOAD, 0);
-                                mv.visitInsn(DUP);
-                                mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "$getStaticMetaClass", "()Lgroovy/lang/MetaClass;");
-                                mv.visitFieldInsn(PUTFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
-                                mv.visitVarInsn(ALOAD, 0);
-                                mv.visitFieldInsn(GETFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
-                            }
-
-                            public ClassNode getType() {
-                                return ClassHelper.METACLASS_TYPE;
-                            }
-                        });
-                metaClassField.setSynthetic(true);
-            }
+            if (!node.isDerivedFromGroovyObject()) node.addInterface(ClassHelper.make(GroovyObject.class));
+            FieldNode metaClassField = getMetaClassField(node);
 
             if (!node.hasMethod("getMetaClass", Parameter.EMPTY_ARRAY)) {
-                List getMetaClassCode = new LinkedList();
-                getMetaClassCode.add(new BytecodeInstruction() {
+                metaClassField = setMetaClassFieldIfNotExists(node, metaClassField);
+                node.addSyntheticMethod(
+                        "getMetaClass",
+                        ACC_PUBLIC | ACC_SYNTHETIC,
+                        ClassHelper.METACLASS_TYPE,
+                        Parameter.EMPTY_ARRAY,
+                        ClassNode.EMPTY_ARRAY,
+                        new BytecodeSequence(new BytecodeInstruction() {
                     public void visit(MethodVisitor mv) {
                         Label nullLabel = new Label();
 
@@ -202,112 +217,106 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
                         mv.visitFieldInsn(GETFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
                         mv.visitInsn(ARETURN);
                     }
-                });
-                node.addSyntheticMethod(
-                        "getMetaClass",
-                        ACC_PUBLIC | ACC_SYNTHETIC,
-                        ClassHelper.METACLASS_TYPE,
-                        Parameter.EMPTY_ARRAY,
-                        ClassNode.EMPTY_ARRAY,
-                        new BytecodeSequence(getMetaClassCode)
+                })
                 );
             }
 
             Parameter[] parameters = new Parameter[] { new Parameter(ClassHelper.METACLASS_TYPE, "mc") };
             if (!node.hasMethod("setMetaClass", parameters)) {
-                List setMetaClassCode = new LinkedList();
-                setMetaClassCode.add(new BytecodeInstruction() {
-                    public void visit(MethodVisitor mv) {
-                        Label nullLabel = new Label();
-
-                        mv.visitVarInsn(ALOAD, 0);
-                        mv.visitVarInsn(ALOAD, 1);
-                        mv.visitFieldInsn(PUTFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
-                    }
-                });
+                metaClassField=setMetaClassFieldIfNotExists(node,metaClassField);
+                Statement setMetaClassCode;                
+                if (Modifier.isFinal(metaClassField.getModifiers())) {
+                    ConstantExpression text = new ConstantExpression("cannot set read-only meta class");
+                    ConstructorCallExpression cce = new ConstructorCallExpression(ClassHelper.make(IllegalArgumentException.class), text);
+                    setMetaClassCode = new ExpressionStatement(cce);
+                } else {
+                    List list = new ArrayList();
+                    list.add (new BytecodeInstruction() {
+                        public void visit(MethodVisitor mv) {
+                            mv.visitVarInsn(ALOAD, 0);
+                            mv.visitVarInsn(ALOAD, 1);
+                            mv.visitFieldInsn(PUTFIELD, classInternalName, "metaClass", "Lgroovy/lang/MetaClass;");
+                            mv.visitInsn(RETURN);
+                        }
+                    });
+                    setMetaClassCode = new BytecodeSequence(list);
+                }
+                
                 node.addSyntheticMethod(
                         "setMetaClass",
                         ACC_PUBLIC,
                         ClassHelper.VOID_TYPE,
-                        parameters,
+                        SET_METACLASS_PARAMS,
                         ClassNode.EMPTY_ARRAY,
-                        new BytecodeSequence(setMetaClassCode)
+                        setMetaClassCode
                 );
             }
 
-
-//            if (!node.hasMethod("invokeMethod", INVOKE_METHOD_PARAMS)) {
-            if (!isGroovyObject) {
-
-                // let's add the invokeMethod implementation
-                List invokeMethodCode = new LinkedList();
-                invokeMethodCode.add(new BytecodeInstruction() {
+            if (!node.hasMethod("invokeMethod",INVOKE_METHOD_PARAMS)) {
+                VariableExpression vMethods = new VariableExpression("method");
+                VariableExpression vArguments = new VariableExpression("arguments");
+                VariableScope blockScope = new VariableScope();
+                blockScope.putReferencedLocalVariable(vMethods);
+                blockScope.putReferencedLocalVariable(vArguments);
+                node.addSyntheticMethod(
+                        "invokeMethod",
+                        ACC_PUBLIC,
+                        ClassHelper.OBJECT_TYPE, INVOKE_METHOD_PARAMS,
+                        ClassNode.EMPTY_ARRAY,
+                        new BytecodeSequence(new BytecodeInstruction() {
                     public void visit(MethodVisitor mv) {
                         mv.visitVarInsn(ALOAD, 0);
                         mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "getMetaClass", "()Lgroovy/lang/MetaClass;");
                         mv.visitVarInsn(ALOAD, 0);
                         mv.visitVarInsn(ALOAD, 1);
                         mv.visitVarInsn(ALOAD, 2);
-                        mv.visitMethodInsn(INVOKEINTERFACE, "groovy/lang/MetaObjectProtocol", "invokeMethod", "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;");
+                        mv.visitMethodInsn(INVOKEINTERFACE, "groovy/lang/MetaClass", "invokeMethod", "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;");
                         mv.visitInsn(ARETURN);
                     }
-                });
-                node.addSyntheticMethod(
-                        "invokeMethod",
-                        ACC_PUBLIC,
-                        ClassHelper.OBJECT_TYPE,
-                        INVOKE_METHOD_PARAMS,
-                        ClassNode.EMPTY_ARRAY,
-                        new BytecodeSequence(invokeMethodCode)
+                })
                 );
             }
 
-            if (!node.isScript()) {
-                if (!node.hasMethod("getProperty", GET_PROPERTY_PARAMS)) {
-                    List getPropertyCode = new LinkedList();
-                    getPropertyCode.add(new BytecodeInstruction() {
-                        public void visit(MethodVisitor mv) {
-                            mv.visitVarInsn(ALOAD, 0);
-                            mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "getMetaClass", "()Lgroovy/lang/MetaClass;");
-                            mv.visitVarInsn(ALOAD, 0);
-                            mv.visitVarInsn(ALOAD, 1);
-                            mv.visitMethodInsn(INVOKEINTERFACE, "groovy/lang/MetaClass", "getProperty", "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;");
-                            mv.visitInsn(ARETURN);
-                        }
-                    });
-                    node.addSyntheticMethod(
-                            "getProperty",
-                            ACC_PUBLIC | ACC_SYNTHETIC,
-                            ClassHelper.OBJECT_TYPE,
-                            GET_PROPERTY_PARAMS,
-                            ClassNode.EMPTY_ARRAY,
-                            new BytecodeSequence(getPropertyCode)
-                    );
-                }
-
-                if (!node.hasMethod("setProperty", SET_PROPERTY_PARAMS)) {
-                    List setPropertyCode = new LinkedList();
-                    setPropertyCode.add(new BytecodeInstruction() {
-                        public void visit(MethodVisitor mv) {
-                            mv.visitVarInsn(ALOAD, 0);
-                            mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "getMetaClass", "()Lgroovy/lang/MetaClass;");
-                            mv.visitVarInsn(ALOAD, 0);
-                            mv.visitVarInsn(ALOAD, 1);
-                            mv.visitVarInsn(ALOAD, 2);
-                            mv.visitMethodInsn(INVOKEINTERFACE, "groovy/lang/MetaClass", "setProperty", "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Object;)V");
-                            mv.visitInsn(RETURN);
-                        }
-                    });
-                    node.addSyntheticMethod(
-                            "setProperty",
-                            ACC_PUBLIC | ACC_SYNTHETIC,
-                            ClassHelper.VOID_TYPE,
-                            SET_PROPERTY_PARAMS,
-                            ClassNode.EMPTY_ARRAY,
-                            new BytecodeSequence(setPropertyCode)
-                    );
-                }
+            if (!node.hasMethod("getProperty", GET_PROPERTY_PARAMS)) {
+                node.addSyntheticMethod(
+                        "getProperty",
+                        ACC_PUBLIC,
+                        ClassHelper.OBJECT_TYPE,
+                        GET_PROPERTY_PARAMS,
+                        ClassNode.EMPTY_ARRAY,
+                        new BytecodeSequence(new BytecodeInstruction() {
+                    public void visit(MethodVisitor mv) {
+                        mv.visitVarInsn(ALOAD, 0);
+                        mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "getMetaClass", "()Lgroovy/lang/MetaClass;");
+                        mv.visitVarInsn(ALOAD, 0);
+                        mv.visitVarInsn(ALOAD, 1);
+                        mv.visitMethodInsn(INVOKEINTERFACE, "groovy/lang/MetaClass", "getProperty", "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;");
+                        mv.visitInsn(ARETURN);
+                    }
+                })
+                );
             }
+
+            if (!node.hasMethod("setProperty", SET_PROPERTY_PARAMS)) {
+                node.addSyntheticMethod(
+                        "setProperty",
+                        ACC_PUBLIC,
+                        ClassHelper.VOID_TYPE,
+                        SET_PROPERTY_PARAMS,
+                        ClassNode.EMPTY_ARRAY,
+                        new BytecodeSequence(new BytecodeInstruction() {
+                    public void visit(MethodVisitor mv) {
+                        mv.visitVarInsn(ALOAD, 0);
+                        mv.visitMethodInsn(INVOKEVIRTUAL, classInternalName, "getMetaClass", "()Lgroovy/lang/MetaClass;");
+                        mv.visitVarInsn(ALOAD, 0);
+                        mv.visitVarInsn(ALOAD, 1);
+                        mv.visitVarInsn(ALOAD, 2);
+                        mv.visitMethodInsn(INVOKEINTERFACE, "groovy/lang/MetaClass", "setProperty", "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Object;)V");
+                        mv.visitInsn(RETURN);                    }
+                })
+                );
+            }
+
         }
 
         if (node.getDeclaredConstructors().isEmpty()) {
@@ -330,22 +339,22 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
     protected void addTimeStamp(ClassNode node) {
         FieldNode timeTagField = new FieldNode(
                 Verifier.__TIMESTAMP,
-                Modifier.PUBLIC | Modifier.STATIC,
+                ACC_PUBLIC | ACC_STATIC | ACC_SYNTHETIC,
                 ClassHelper.Long_TYPE,
                 //"",
                 node,
-                new ConstantExpression(new Long(System.currentTimeMillis())));
+                new ConstantExpression(System.currentTimeMillis()));
         // alternatively , FieldNode timeTagField = SourceUnit.createFieldNode("public static final long __timeStamp = " + System.currentTimeMillis() + "L");
         timeTagField.setSynthetic(true);
         node.addField(timeTagField);
 
         timeTagField = new FieldNode(
                 Verifier.__TIMESTAMP__ + String.valueOf(System.currentTimeMillis()),
-                Modifier.PUBLIC | Modifier.STATIC,
+                ACC_PUBLIC | ACC_STATIC | ACC_SYNTHETIC,
                 ClassHelper.Long_TYPE,
                 //"",
                 node,
-                new ConstantExpression(new Long(0)));
+                new ConstantExpression((long) 0));
         // alternatively , FieldNode timeTagField = SourceUnit.createFieldNode("public static final long __timeStamp = " + System.currentTimeMillis() + "L");
         timeTagField.setSynthetic(true);
         node.addField(timeTagField);
@@ -371,7 +380,7 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
                 if (!firstMethodCall) return;
                 firstMethodCall = false;
                 String name = call.getMethodAsString();
-                // the name might not be null if the method name is a GString for example
+                // the name might be null if the method name is a GString for example
                 if (name==null) return;
                 if (!name.equals("super") && !name.equals("this")) return;
                 type=name;
@@ -386,7 +395,6 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
             }
         };
         Statement s = node.getCode();
-        //todo why can a statement can be null?
         if (s == null) return;
         s.visit(checkSuper);
     }
@@ -415,23 +423,25 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
               node.setCode(addReturnsIfNeeded(statement, node.getVariableScope()));
         }
         else if (!node.isAbstract()) {
-        	BlockStatement newBlock = new BlockStatement();
-            if (statement instanceof BlockStatement) {
-                newBlock.addStatements(filterStatements(((BlockStatement)statement).getStatements()));
+            if (!(statement instanceof BytecodeSequence)) {
+                BlockStatement newBlock = new BlockStatement();
+                if (statement instanceof BlockStatement) {
+                    newBlock.addStatements(filterStatements(((BlockStatement)statement).getStatements()));
+                } else {
+                    newBlock.addStatement(filterStatement(statement));
+                }
+                newBlock.addStatement(ReturnStatement.RETURN_NULL_OR_VOID);
+                newBlock.setSourcePosition(statement);
+                node.setCode(newBlock);
             }
-            else {
-                newBlock.addStatement(filterStatement(statement));
-            }
-            newBlock.addStatement(ReturnStatement.RETURN_NULL_OR_VOID);
-            node.setCode(newBlock);
         }
     }
 
     private Statement addReturnsIfNeeded(Statement statement, VariableScope scope) {
         if (  statement instanceof ReturnStatement
            || statement instanceof BytecodeSequence
-           || statement instanceof ThrowStatement
-                ) {
+           || statement instanceof ThrowStatement)
+        {
             return statement;
         }
 
@@ -441,7 +451,10 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
 
         if (statement instanceof ExpressionStatement) {
             ExpressionStatement expStmt = (ExpressionStatement) statement;
-            return new ReturnStatement(expStmt.getExpression());
+            Expression expr = expStmt.getExpression(); 
+            ReturnStatement ret = new ReturnStatement(expr);
+            ret.setSourcePosition(expr);
+            return ret;
         }
 
         if (statement instanceof SynchronizedStatement) {
@@ -486,7 +499,9 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
                 }
             }
             else {
-                return new ReturnStatement(ConstantExpression.NULL);
+                ReturnStatement ret = new ReturnStatement(ConstantExpression.NULL);
+                ret.setSourcePosition(block);
+                return ret;
             }
 
             return new BlockStatement(filterStatements(list),block.getVariableScope());
@@ -539,6 +554,10 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         Statement getterBlock = node.getGetterBlock();
         if (getterBlock == null) {
             MethodNode getter = classNode.getGetterMethod(getterName);
+            if(getter == null && ClassHelper.boolean_TYPE==node.getType()) {
+            	String secondGetterName = "is" + capitalize(name);
+            	getter = classNode.getGetterMethod(secondGetterName);
+            }
             if (!node.isPrivate() && methodNeedsReplacement(getter)) {
                 getterBlock = createGetterBlock(node, field);
             }
@@ -688,13 +707,26 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         Statement firstStatement = constructorNode.getFirstStatement();
         ConstructorCallExpression first = getFirstIfSpecialConstructorCall(firstStatement);
         
-        // in case of this(...) let the other constructor do the intit
+        // in case of this(...) let the other constructor do the init
         if (first!=null && first.isThisCall()) return;
         
         List statements = new ArrayList();
         List staticStatements = new ArrayList();
+        final boolean isEnumClassNode = isEnum(node);
+        List initStmtsAfterEnumValuesInit = new ArrayList();
+        Set explicitStaticPropsInEnum = new HashSet();
+        if(isEnumClassNode) {
+        	for (Iterator iter = node.getProperties().iterator(); iter.hasNext();) {
+        		PropertyNode propNode = (PropertyNode) iter.next();
+        		if(!propNode.isSynthetic() && propNode.getField().isStatic()) {
+        			explicitStaticPropsInEnum.add(propNode.getField().getName());
+        		}
+        	}
+        }
         for (Iterator iter = node.getFields().iterator(); iter.hasNext();) {
-            addFieldInitialization(statements, staticStatements, (FieldNode) iter.next());
+        	addFieldInitialization(statements, staticStatements, 
+        			(FieldNode) iter.next(), isEnumClassNode, 
+        			initStmtsAfterEnumValuesInit, explicitStaticPropsInEnum);
         }
         statements.addAll(node.getObjectInitializerStatements());
         if (!statements.isEmpty()) {
@@ -716,12 +748,30 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
                 } 
                 statements.addAll(otherStatements);
             }
-            constructorNode.setCode(new BlockStatement(statements, block.getVariableScope()));
+            BlockStatement newBlock = new BlockStatement(statements, block.getVariableScope());
+            newBlock.setSourcePosition(block);
+            constructorNode.setCode(newBlock);
         }
 
         if (!staticStatements.isEmpty()) {
-            node.addStaticInitializerStatements(staticStatements,true);
+        	if(isEnumClassNode) {
+        		/*
+        		 * GROOVY-3161: initialize statements for explicitly declared static fields 
+        		 * inside an enum should come after enum values are initialized
+        		 */
+        		staticStatements.removeAll(initStmtsAfterEnumValuesInit);
+        		node.addStaticInitializerStatements(staticStatements, true);
+        		if(!initStmtsAfterEnumValuesInit.isEmpty()) {
+        			node.addStaticInitializerStatements(initStmtsAfterEnumValuesInit, false);
+        		}
+        	} else {
+        		node.addStaticInitializerStatements(staticStatements, true);
+        	}
         }
+    }
+    
+    private boolean isEnum(ClassNode node) {
+    	return (node.getModifiers() & Opcodes.ACC_ENUM) != 0;
     }
 
     private ConstructorCallExpression getFirstIfSpecialConstructorCall(Statement code) {
@@ -734,10 +784,8 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         return null;
     }
 
-    protected void addFieldInitialization(
-        List list,
-        List staticList,
-        FieldNode fieldNode) {
+    protected void addFieldInitialization(List list, List staticList, FieldNode fieldNode,
+    		boolean isEnumClassNode, List initStmtsAfterEnumValuesInit, Set explicitStaticPropsInEnum) {
         Expression expression = fieldNode.getInitialExpression();
         if (expression != null) {
             ExpressionStatement statement =
@@ -747,8 +795,22 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
                         Token.newSymbol(Types.EQUAL, fieldNode.getLineNumber(), fieldNode.getColumnNumber()),
                         expression));
             if (fieldNode.isStatic()) {
-                staticList.add(statement);
+            	// GROOVY-3311: pre-defined constants added by groovy compiler for numbers/characters should be
+            	// initialized first so that code dependent on it does not see their values as empty
+            	if (expression instanceof ConstantExpression) {
+                    staticList.add(0, statement);
+            	} else {
+                    staticList.add(statement);
+            	}
                 fieldNode.setInitialValueExpression(null); // to avoid double initialization in case of several constructors
+                /*
+                 * If it is a statement for an explicitly declared static field inside an enum, store its
+                 * reference. For enums, they need to be handled differently as such init statements should
+                 * come after the enum values have been initialized inside <clinit> block. GROOVY-3161.
+                 */
+                if(isEnumClassNode && explicitStaticPropsInEnum.contains(fieldNode.getName())) {
+                	initStmtsAfterEnumValuesInit.add(statement);
+                }
             }
             else {
                 list.add(statement);
@@ -760,18 +822,41 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
      * Capitalizes the start of the given bean property name
      */
     public static String capitalize(String name) {
-        return name.substring(0, 1).toUpperCase() + name.substring(1, name.length());
+        return MetaClassHelper.capitalize(name);
     }
 
-    protected Statement createGetterBlock(PropertyNode propertyNode, FieldNode field) {
-        Expression expression = new FieldExpression(field);
-        return new ReturnStatement(expression);
+    protected Statement createGetterBlock(PropertyNode propertyNode, final FieldNode field) {
+        return new BytecodeSequence(new BytecodeInstruction(){
+            public void visit(MethodVisitor mv) {
+                if (field.isStatic()) {
+                    mv.visitFieldInsn(GETSTATIC, BytecodeHelper.getClassInternalName(classNode), field.getName(), BytecodeHelper.getTypeDescription(field.getType()));
+                }
+                else {
+                    mv.visitVarInsn(ALOAD, 0);
+                    mv.visitFieldInsn(GETFIELD, BytecodeHelper.getClassInternalName(classNode), field.getName(), BytecodeHelper.getTypeDescription(field.getType()));
+                }
+                final BytecodeHelper helper = new BytecodeHelper(mv);
+                helper.doReturn(field.getType());
+            }
+        });
     }
 
-    protected Statement createSetterBlock(PropertyNode propertyNode, FieldNode field) {
-        Expression expression = new FieldExpression(field);
-        return new ExpressionStatement(
-            new BinaryExpression(expression, Token.newSymbol(Types.EQUAL, 0, 0), new VariableExpression("value")));
+    protected Statement createSetterBlock(PropertyNode propertyNode, final FieldNode field) {
+        return new BytecodeSequence(new BytecodeInstruction(){
+            public void visit(MethodVisitor mv) {
+                final BytecodeHelper helper = new BytecodeHelper(mv);
+                if (field.isStatic()) {
+                    helper.load(field.getType(), 0);
+                    mv.visitFieldInsn(PUTSTATIC, BytecodeHelper.getClassInternalName(classNode), field.getName(), BytecodeHelper.getTypeDescription(field.getType()));
+                }
+                else {
+                    mv.visitVarInsn(ALOAD, 0);
+                    helper.load(field.getType(), 1);
+                    mv.visitFieldInsn(PUTFIELD, BytecodeHelper.getClassInternalName(classNode), field.getName(), BytecodeHelper.getTypeDescription(field.getType()));
+                }
+                mv.visitInsn(RETURN);
+            }
+        });
     }
 
     /**
@@ -828,44 +913,81 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
     
     protected void addCovariantMethods(ClassNode classNode) {
         Map methodsToAdd = new HashMap();
-        List declaredMethods = new ArrayList(classNode.getMethods());
         Map genericsSpec = new HashMap();
-        
-        // remove staic methods from declaredMethods
-        for (Iterator methodsIterator = declaredMethods.iterator(); methodsIterator.hasNext();) {
-            MethodNode m = (MethodNode) methodsIterator.next();
-            if (m.isStatic()) methodsIterator.remove();
+
+        // unimplemented abstract methods from interfaces
+        Map abstractMethods = new HashMap();
+        ClassNode[] interfaces = classNode.getInterfaces();
+        for (int i = 0; i < interfaces.length; i++) {
+            ClassNode iface = interfaces[i];
+            Map ifaceMethodsMap = iface.getDeclaredMethodsMap();
+            abstractMethods.putAll(ifaceMethodsMap);
         }
         
-        addCovariantMethods(classNode, declaredMethods, methodsToAdd, genericsSpec);
-       
-        for (Iterator it = methodsToAdd.values().iterator(); it.hasNext();) {
-            MethodNode method = (MethodNode) it.next();
+        List declaredMethods = new ArrayList(classNode.getMethods());
+        // remove all static, private and package private methods
+        for (Iterator methodsIterator = declaredMethods.iterator(); methodsIterator.hasNext();) {
+            MethodNode m = (MethodNode) methodsIterator.next();
+            abstractMethods.remove(m.getTypeDescriptor());
+            if (m.isStatic() || !(m.isPublic() || m.isProtected())) {
+                methodsIterator.remove();
+            } 
+        }
+        
+        addCovariantMethods(classNode, declaredMethods, abstractMethods, methodsToAdd, genericsSpec);
+
+        Map declaredMethodsMap = new HashMap();
+        if (methodsToAdd.size()>0) {
+            for (Iterator methodsIterator = declaredMethods.iterator(); methodsIterator.hasNext();) {
+                MethodNode m = (MethodNode) methodsIterator.next();
+                declaredMethodsMap.put(m.getTypeDescriptor(),m);
+            }
+        }
+        
+        for (Iterator it = methodsToAdd.entrySet().iterator(); it.hasNext();) {
+            Map.Entry entry = (Map.Entry) it.next();
+            MethodNode method = (MethodNode) entry.getValue();
+            // we skip bridge methods implemented in current class already
+            MethodNode mn = (MethodNode) declaredMethodsMap.get(entry.getKey());
+            if (mn!=null && mn.getDeclaringClass().equals(classNode)) continue;
             classNode.addMethod(method);
         }
     }
     
-    private void addCovariantMethods(ClassNode classNode, List declaredMethods, Map methodsToAdd, Map oldGenericsSpec) {
+    private void addCovariantMethods(ClassNode classNode, List declaredMethods, Map abstractMethods, Map methodsToAdd, Map oldGenericsSpec) {
         ClassNode sn = classNode.getUnresolvedSuperClass(false);
+        
         if (sn!=null) {
             Map genericsSpec = createGenericsSpec(sn,oldGenericsSpec);
+            List classMethods = sn.getMethods();
+            // original class causing bridge methods for methods in super class
             for (Iterator it = declaredMethods.iterator(); it.hasNext();) {
                 MethodNode method = (MethodNode) it.next();
                 if (method.isStatic()) continue;
-                storeMissingCovariantMethods(sn,method,methodsToAdd,genericsSpec);
+                storeMissingCovariantMethods(classMethods,method,methodsToAdd,genericsSpec);
             }
-            addCovariantMethods(sn.redirect(),declaredMethods,methodsToAdd,genericsSpec);
+            // super class causing bridge methods for abstract methods in original class
+            if (!abstractMethods.isEmpty()) {
+                for (Iterator it = classMethods.iterator(); it.hasNext();) {
+                    MethodNode method = (MethodNode) it.next();
+                    if (method.isStatic()) continue;
+                    storeMissingCovariantMethods(abstractMethods.values(),method,methodsToAdd,Collections.EMPTY_MAP);
+                }
+            }
+            
+            addCovariantMethods(sn.redirect(),declaredMethods,abstractMethods,methodsToAdd,genericsSpec);
         }
         
         ClassNode[] interfaces = classNode.getInterfaces();
         for (int i=0; i<interfaces.length; i++) {
+            List interfacesMethods = interfaces[i].getMethods();
             Map genericsSpec = createGenericsSpec(interfaces[i],oldGenericsSpec);
             for (Iterator it = declaredMethods.iterator(); it.hasNext();) {
                 MethodNode method = (MethodNode) it.next();
                 if (method.isStatic()) continue;
-                storeMissingCovariantMethods(interfaces[i],method,methodsToAdd,genericsSpec);
+                storeMissingCovariantMethods(interfacesMethods,method,methodsToAdd,genericsSpec);
             }
-            addCovariantMethods(interfaces[i],declaredMethods,methodsToAdd,genericsSpec);
+            addCovariantMethods(interfaces[i],declaredMethods,abstractMethods,methodsToAdd,genericsSpec);
         }
         
     }
@@ -885,26 +1007,29 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         boolean equalReturnType = mr.equals(omr);
         if (equalReturnType && normalEqualParameters) return null;
 
-        // if we reach this point we have at last one parameter or return type, that
+        // if we reach this point we have at least one parameter or return type, that
         // is different in its specified form. That means we have to create a bridge method!
         ClassNode testmr = correctToGenericsSpec(genericsSpec,omr);
         if (!isAssignable(mr,testmr)){
             throw new RuntimeParserException(
-                    "the return type is incompatible with "+
+                    "The return type of "+
+                    overridingMethod.getTypeDescriptor()+
+                    " in "+overridingMethod.getDeclaringClass().getName()+
+                    " is incompatible with "+
                     oldMethod.getTypeDescriptor()+
                     " in "+oldMethod.getDeclaringClass().getName(),
                     overridingMethod);
         }
         if ((oldMethod.getModifiers()&ACC_FINAL)!=0) {
             throw new RuntimeParserException(
-                    "cannot override final method "+
+                    "Cannot override final method "+
                     oldMethod.getTypeDescriptor()+
                     " in "+oldMethod.getDeclaringClass().getName(),
                     overridingMethod);
         }
         if (oldMethod.isStatic() != overridingMethod.isStatic()){
             throw new RuntimeParserException(
-                    "cannot override method "+
+                    "Cannot override method "+
                     oldMethod.getTypeDescriptor()+
                     " in "+oldMethod.getDeclaringClass().getName()+
                     " with disparate static modifier",
@@ -949,7 +1074,11 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
 
     private boolean isAssignable(ClassNode node, ClassNode testNode) {
         if (testNode.isInterface()) {
-            if (node.implementsInterface(testNode)) return true;
+        	if(node.isInterface()) {
+        		if (node.isDerivedFrom(testNode)) return true;
+        	} else {
+        		if (node.implementsInterface(testNode)) return true;
+        	}
         } else {
             if (node.isDerivedFrom(testNode)) return true;
         }
@@ -964,8 +1093,7 @@ public class Verifier implements GroovyClassVisitor, Opcodes {
         return params;
     }
 
-    private void storeMissingCovariantMethods(ClassNode current, MethodNode method, Map methodsToAdd, Map genericsSpec) {
-        List methods = current.getMethods();
+    private void storeMissingCovariantMethods(Collection methods, MethodNode method, Map methodsToAdd, Map genericsSpec) {
         for (Iterator sit = methods.iterator(); sit.hasNext();) {
             MethodNode toOverride = (MethodNode) sit.next();
             MethodNode bridgeMethod = getCovariantImplementation(toOverride,method,genericsSpec);

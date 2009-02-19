@@ -5,7 +5,7 @@ class CategoryTest extends GroovyTestCase {
     void setUp() {
         def dummy = null
         CategoryTestPropertyCategory.setSomething(dummy, 'hello')
-        CategoryTestHelperPropertyReplacer.setAProperty(dummy, 'anotherValue')
+        CategoryTestHelperPropertyReplacer.setaProperty(dummy, 'anotherValue')
     }
 
     void testCategories() {
@@ -104,6 +104,33 @@ class CategoryTest extends GroovyTestCase {
       """
     }
     
+    void testCategoryInheritance() {
+      assertScript """
+        public class Foo {
+          static Object foo(Object obj) {
+            "Foo.foo()"
+          }
+        }
+        
+        public class Bar extends Foo{
+          static Object bar(Object obj) {
+            "Bar.bar()"
+          }
+        }
+        
+        def obj = new Object()
+        
+        use(Foo){
+          assert obj.foo() == "Foo.foo()"
+        }
+        
+        use(Bar){
+          assert obj.bar() == "Bar.bar()"
+          assert obj.foo() == "Foo.foo()"
+        }
+      """
+    }
+    
 }
 
 class StringCategory {
@@ -130,6 +157,6 @@ class CategoryTestHelper {
 
 class CategoryTestHelperPropertyReplacer {
     private static aVal = "anotherValue"
-    static getAProperty(CategoryTestHelper self) { return aVal }
-    static void setAProperty(CategoryTestHelper self, newValue) { aVal = newValue }
+    static getaProperty(CategoryTestHelper self) { return aVal }
+    static void setaProperty(CategoryTestHelper self, newValue) { aVal = newValue }
 }

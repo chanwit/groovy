@@ -15,8 +15,12 @@
  */
 package groovy.time;
 
+import org.codehaus.groovy.runtime.DefaultGroovyMethods;
+
 import java.util.Calendar;
 import java.util.Date;
+import java.util.List;
+import java.util.ArrayList;
 
 public abstract class BaseDuration {
     protected final int years;
@@ -83,7 +87,26 @@ public abstract class BaseDuration {
         
         return cal.getTime();
     }
-    
+
+    public String toString() {
+        List buffer = new ArrayList();
+
+        if (this.years      != 0) buffer.add(this.years   + " years");
+        if (this.months     != 0) buffer.add(this.months  + " months");
+        if (this.days       != 0) buffer.add(this.days    + " days");
+        if (this.hours      != 0) buffer.add(this.hours   + " hours");
+        if (this.minutes    != 0) buffer.add(this.minutes + " minutes");
+
+        if (this.seconds != 0 || this.millis != 0)
+            buffer.add(this.seconds + "." + DefaultGroovyMethods.padLeft("" + this.millis, new Integer(3), "0")  + " seconds");
+
+        if (buffer.size()!=0) {
+            return DefaultGroovyMethods.join(buffer, ", ");
+        } else {
+            return "0";
+        }
+    }
+
     public abstract long toMilliseconds();
     
     public abstract Date getAgo();

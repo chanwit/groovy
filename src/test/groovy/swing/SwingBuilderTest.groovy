@@ -34,7 +34,7 @@ import java.awt.event.ActionEvent
 class SwingBuilderTest extends GroovySwingTestCase {
 
     void testWidgetId() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def localVar = null
@@ -54,13 +54,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.getVariables().containsKey('byExpr')
         assert !swing.getVariables().containsKey('localVar')
         assert swing.getVariables().containsKey('byKey')
-
-
+      }
     }
 
     void testNamedWidgetCreation() {
-        if (headless) return
-
+      testInEDT {
         def topLevelWidgets = [
             frame: [JFrame.class, true],
             dialog: [JDialog.class, true],
@@ -78,10 +76,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             assert widget.class == widgetInfo[0]
             if (widgetInfo[1]) assert widget.title == "This is my $name"
         }
+      }
     }
 
     void testLayoutCreation() {
-        if (headless) return
+      testInEDT {
 
         def layouts = [
             borderLayout: BorderLayout.class,
@@ -100,10 +99,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             }
             assert frame.contentPane.layout.class == expectedLayoutClass
         }
+      }
     }
 
     void testGridBagFactory() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame {
@@ -121,10 +121,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 label(fill:GridBagConstraints.BOTH)
             }
         }
+      }
     }
 
     void testBorderLayout() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame {
@@ -138,20 +139,22 @@ class SwingBuilderTest extends GroovySwingTestCase {
               label("x", constraints:NORTH)
             }
         }
+      }
     }
 
     void testLayoutConstraintsProperty() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame {
           borderLayout(constraintsProperty:'direction')
           label("x", direction:NORTH)
         }
+      }
     }
 
     void testWidgetCreation() {
-        if (headless) return
+      testInEDT {
 
         def widgets = [
             button: JButton.class,
@@ -198,10 +201,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             }
             assert swing."${name}Id".class == expectedLayoutClass
         }
+      }
     }
 
     void testButtonGroup() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.panel {
@@ -230,20 +234,22 @@ class SwingBuilderTest extends GroovySwingTestCase {
         swing.cb2b.selected = true
         assert statusCBs() == [false, true, false, true]
 
+      }
     }
 
     void testButtonGroupOnlyForButtons() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         def buttonGroup = swing.buttonGroup()
         shouldFail(MissingPropertyException) {
             swing.label(buttonGroup:buttonGroup)
         }
+      }
     }
 
     void testWidget() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def label = swing.label("By Value:")
@@ -251,10 +257,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert widgetByValue != null
         def widgetByLabel = swing.widget(widget: label)
         assert widgetByLabel != null
+      }
     }
 
     void testSplitPane() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def buttonGroup = swing.buttonGroup()
@@ -272,10 +279,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.hsplit.rightComponent == swing.right
         assert swing.vsplit.topComponent == swing.top
         assert swing.vsplit.bottomComponent == swing.bottom
+      }
     }
 
     void testNestedWindows() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.window (id:'root') {
@@ -301,10 +309,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             swing.window()
             swing.dialog()
         }
+      }
     }
 
     void testFrames() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame(id:'frame') {
@@ -312,10 +321,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         }
         assert swing.frame.rootPane.defaultButton == swing.button
         assert swing.button.defaultButton
+      }
     }
 
     void testDialogs() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.dialog(id:'d1')
@@ -332,19 +342,21 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.d2.owner != swing.d
         assert swing.d2.owner != swing.f
         assert swing.d2.owner != swing.d1
+      }
     }
 
     void testWindows() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.window()
         swing.frame{ window() }
         swing.dialog{ window() }
+      }
     }
 
     void testNodeCreation() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def frame = swing.frame(){
@@ -360,10 +372,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 button(new Date())
             }
         }
+      }
     }
 
     void testSetMnemonic() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.panel(layout:new BorderLayout()) {
@@ -384,17 +397,19 @@ class SwingBuilderTest extends GroovySwingTestCase {
         int expected2 = 'A'
         int actual = swing.actionId.getValue(Action.MNEMONIC_KEY)
         assert  actual == expected2
+      }
     }
 
     void testBuilderProperties() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         assert swing.class.name == SwingBuilder.class.name
+      }
     }
 
     void testFormattedTextField() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def dummy = new Date()
@@ -407,10 +422,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         field = swing.formattedTextField()
         field.value = 3
         assert field.formatter.class == NumberFormatter.class
+      }
     }
 
     void testTabbedPane() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.tabbedPane(id:'tp') {
@@ -428,7 +444,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
             panel(id:'pC', title:'Title C', tabDisplayedMnemonicIndex: 2)
         }
 
-        assert swing.tp.tabCount == 12 
+        assert swing.tp.tabCount == 12
         assert swing.tp.indexOfComponent(swing.p1) == 0
         assert swing.tp.indexOfComponent(swing.p2) == 1
         assert swing.tp.indexOfComponent(swing.p3) == 2
@@ -477,11 +493,21 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.st.indexOfTab('sta') == swing.st.indexOfComponent(swing.sa)
         assert swing.st.indexOfTab('stb') == swing.st.indexOfComponent(swing.sb)
 
-
+        // insure we don't collide with bind node work        
+        // GROOVY-3288
+        def model=[wordValue:'word']
+        swing.tabbedPane {
+          panel( title: "a") {
+              textField( id: 'wordValue', columns: 20)
+          }
+          bean( model, word: bind{ wordValue.text } )
+        }
+        // no asserts, the above is pass/fai;  
+      }
     }
 
     void testTabbedPaneRenamedProperties() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.tabbedPane(id:'tp',
@@ -525,10 +551,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.tp.isEnabledAt(9) == false
         assert swing.tp.getMnemonicAt(10) == 0x54
         assert swing.tp.getDisplayedMnemonicIndexAt(11) == 2
+      }
     }
 
     void testScrollPane() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         shouldFail {
@@ -537,10 +564,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 button("Cancel")
             }
         }
+      }
     }
 
     void testComboBox() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         Object[] objects = ['a','b']
@@ -550,10 +578,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.comboBox(items:list).itemCount == 3
         assert swing.comboBox(items:vector).itemCount == 4
         assert swing.comboBox().itemCount == 0
+      }
     }
 
     void testList() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         Object[] objects = ['a','b']
@@ -563,10 +592,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.list(items:list   ).model.size == 3
         assert swing.list(items:vector ).model.size == 4
         assert swing.list(             ).model.size == 0
+      }
     }
 
     void testMisplacedActionsAreIgnored() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         // labels don't support actions; should be ignored
@@ -580,10 +610,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 action(id:'actionId')
             }
         }
+      }
     }
 
     void testBoxLayout() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def message = shouldFail{
@@ -598,10 +629,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         swing.frame(id:'frame'){
             boxLayout(id:'layout2', axis:BoxLayout.Y_AXIS)
         }
+      }
     }
 
     void testKeystrokesWithinActions() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.panel{
@@ -621,10 +653,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         def values = inputMap.allKeys().toList().collect{ inputMap.get(it) }
         assert values.contains(expected1)
         assert values.contains(expected2)
+      }
     }
 
     void testActionClosures() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def testTarget = 'blank'
@@ -660,10 +693,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             swing.z.actionPerformed(evt)
         }
 
+      }
     }
 
     void testSetAccelerator() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def help = swing.action(accelerator:'F1')
@@ -673,6 +707,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
         def aboutKeyStroke = about.getValue(Action.ACCELERATOR_KEY)
         assert aboutKeyStroke.keyCode == KeyEvent.VK_SPACE
         assert(aboutKeyStroke.modifiers & InputEvent.CTRL_MASK) != 0
+      }
     }
 
     private verifyAccel(action, int mustHave = 0) {
@@ -684,7 +719,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
     }
 
     void testSetAcceleratorShortcuts() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         char q = 'Q'
@@ -696,10 +731,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             verifyAccel(action(accelerator: shortcut('DELETE')))
             verifyAccel(action(accelerator: shortcut('DELETE', InputEvent.SHIFT_DOWN_MASK)), InputEvent.SHIFT_DOWN_MASK)
         }
+      }
     }
 
     void testBorderLayoutConstraints() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.internalFrame(id:'frameId',
@@ -726,29 +762,32 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.vboxId.parent == swing.frameId.contentPane
         assert swing.hboxId.parent == swing.frameId.contentPane
         assert swing.scrollId.parent == swing.frameId.contentPane
+      }
     }
 
     void testSetConstraints() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.panel(layout:new BorderLayout()) {
             label(text:'Name', constraints:BorderLayout.CENTER)
         }
+      }
     }
 
     void testSetToolTipText() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.panel(layout:new BorderLayout()) {
             label(id:'labelId', text:'Name', toolTipText:'This is the name field')
         }
 
+      }
     }
 
     void testTableLayout() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def msg = shouldFailWithCause(RuntimeException){
@@ -780,10 +819,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.label.parent.parent.parent
         assert swing.label.parent.parent.parent.parent
         assert swing.frame == swing.label.parent.parent.parent.parent.parent
+      }
     }
 
     void testAttributeOrdering() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
 
@@ -803,10 +843,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         // the screen, relative to it's size, so centering it after sizing it
         // should result in a 250,250 offset from centering it before sizing it
         assert locationFirst != locationLast
+      }
     }
 
     void testWidgetPassthroughConstraints() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def foo = swing.button('North')
@@ -815,10 +856,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             widget(foo, constraints: BorderLayout.NORTH)
             // a failed test throws MissingPropertyException by now
         }
+      }
     }
 
     void testGROOVY1837ReuseAction() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
 
@@ -829,10 +871,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         swing.action(testAction)
         assert testAction.getValue(Action.MNEMONIC_KEY) != null
         assert testAction.getValue(Action.ACCELERATOR_KEY) != null
+      }
     }
 
     void testSeparators() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         swing.frame {
@@ -847,20 +890,22 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.menuSep instanceof JPopupMenu_Separator
         assert swing.tbSep instanceof JToolBar_Separator
         assert swing.sep instanceof JSeparator
+      }
     }
 
     void testCollectionNodes() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
         def collection = swing.actions {
             action(id:'test')
         }
         assert collection.contains(swing.test)
+      }
     }
 
     void testFactoryCornerCases() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
 
@@ -872,10 +917,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         swing.registerFactory("nullWidget",
             [newInstance:{builder, name, value, props -> null}] as AbstractFactory)
         assert swing.nullWidget() == null
+      }
     }
 
     void testFactoryLogging() {
-        if (headless) return
+      testInEDT {
 
         def logger = java.util.logging.Logger.getLogger(SwingBuilder.class.name)
         def oldLevel = logger.getLevel()
@@ -883,13 +929,16 @@ class SwingBuilderTest extends GroovySwingTestCase {
         def swing = new SwingBuilder()
         swing.label()
         logger.setLevel(oldLevel)
+      }
     }
 
     void testEnhancedValueArguments() {
-        if (headless) return
+      testInEDT {
 
         def swing = new SwingBuilder()
 
+        // elements that take an action, icon, string, GString,
+        // or their own type as a value arg
         def anAction = swing.action(name:"test action")
         def icon = new javax.swing.plaf.metal.MetalComboBoxIcon()
         def richActionItems = [
@@ -906,11 +955,13 @@ class SwingBuilderTest extends GroovySwingTestCase {
             swing."$name"(anAction, id:"${name}Action".toString())
             swing."$name"(icon, id:"${name}Icon".toString())
             swing."$name"("string", id:"${name}String".toString())
+            swing."$name"("${'g'}string", id:"${name}GString".toString())
             swing."$name"(swing."${name}Action", id:"${name}Self".toString())
 
             assert swing."${name}Action"
             assert swing."${name}Icon"
             assert swing."${name}String".text == 'string'
+            assert swing."${name}GString".text == 'gstring'
             assert swing."${name}Self" == swing."${name}Action"
             shouldFail {
                 swing."$name"(['bad'])
@@ -1009,7 +1060,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
             }
         }
 
-         // elements take their own type as a value argument or a stringa s a text property
+         // elements take their own type as a value argument or a [g]string as a text property
         def textItems = [
             "editorPane",
             "label",
@@ -1023,8 +1074,10 @@ class SwingBuilderTest extends GroovySwingTestCase {
             swing.frame {
                 "$name"(swing."$name"(), id:"${name}Self".toString())
                 "$name"('text', id:"${name}Text".toString())
+                "$name"("${'g'}string", id:"${name}GString".toString())
             }
             assert swing."${name}Text".text == 'text'
+            assert swing."${name}GString".text == 'gstring'
 
             shouldFail {
                 swing.frame {
@@ -1072,6 +1125,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 label('Nothing')
             }
         }
+      }
     }
 
     boolean instancePass
@@ -1139,7 +1193,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
     }
 
     void testDoOutside() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         boolean pass = false
@@ -1178,10 +1232,116 @@ class SwingBuilderTest extends GroovySwingTestCase {
             maxFailures--
         }
         assert instancePass
+      }
+    }
+
+    void testJumbledThreading() {
+        if (headless) return;
+
+        def swing = new SwingBuilder()
+        Closure threadTest = {c ->
+            boolean notifyReached = false;
+            Throwable caughtThrowable = null
+            Thread t = Thread.start {
+                try {
+                    c()
+                } catch (Throwable throwable) {
+                    caughtThrowable = throwable
+                }
+                notifyReached = true
+                synchronized(swing) { swing.notifyAll() }
+            }
+
+            synchronized(swing) { swing.wait(2000); }
+            if (!notifyReached && t.isAlive()) {
+                Thread.start {
+                    sleep(1000)
+                    exit(0)
+                }
+                fail("EDT Deadlock")
+            }
+            if (caughtThrowable) {
+                throw caughtThrowable
+            }
+            assert swing.l.parent != null
+            notifyReached = false
+        }
+
+        threadTest {
+            swing.frame {
+                edt {
+                    label('label', id:'l')
+                }
+            }
+        }
+
+        threadTest {
+            swing.edt {
+                swing.frame {
+                    edt {
+                        label('label', id:'l')
+                    }
+                }
+            }
+        }
+
+        // full build in EDT shold be fine
+        threadTest {
+            swing.edt {
+                swing.frame {
+                    label('label', id:'l')
+                }
+            }
+        }
+
+        // nested build(Closure) call.
+        // Bad form, but it shouldn't break stuff
+        threadTest {
+            swing.frame {
+                build {
+                    label('label', id:'l')
+                }
+            }
+        }
+
+        // insure the legacy static build(Closure) call still works.
+        def oldSwing = swing
+        threadTest {
+            swing = SwingBuilder.build {
+                frame {
+                    label('label', id:'l')
+                }
+            }
+        }
+        assert swing != oldSwing
+    }
+
+    void testParallelBuild() {
+        if (headless) return;
+
+        def swing = new SwingBuilder()
+        def p
+        def l
+
+        Thread t1 = Thread.start {
+            p = swing.panel() {
+                sleep(100)
+                label('child')
+            }
+        }
+        Thread t2 = Thread.start {
+            sleep(50)
+            l = swing.label('loner')
+        }
+
+        t1.join()
+        t2.join()
+
+        assert l.parent == null
     }
 
     void testDispose() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame(id:'frame').pack()
@@ -1199,10 +1359,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert !swing.dialog.isDisplayable()
         assert !swing.window.isDisplayable()
 
+      }
     }
 
     void testPackAndShow() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame(id:'frame', pack:true)
@@ -1231,10 +1392,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.dialog.visible
         assert swing.window.visible
         swing.dispose()
+      }
     }
 
     void testContainment() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         def topLevel = [
@@ -1331,10 +1493,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 assert parent.viewport == child.parent
             }
         }
+      }
     }
 
     void testMenus() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         def frame = swing.frame {
@@ -1375,10 +1538,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.subMenu.getItem(3) == null // not a menu item
         assert swing.subMenu.getMenuComponent(3) == swing.subsep
         assert swing.subMenu.getItem(4) == swing.subSubMenu
+      }
     }
 
     void testLookAndFeel() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         def oldLAF = UIManager.getLookAndFeel()
@@ -1394,6 +1558,7 @@ class SwingBuilderTest extends GroovySwingTestCase {
                 swing.lookAndFeel(this)
             }
             swing.lookAndFeel('javax.swing.plaf.metal.MetalLookAndFeel')
+            swing.lookAndFeel("${'j'}avax.swing.plaf.metal.MetalLookAndFeel")
             shouldFail() {
                 swing.lookAndFeel('BogusLookAndFeel')
             }
@@ -1425,10 +1590,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         } finally {
             UIManager.setLookAndFeel(oldLAF)
         }
+      }
    }
 
     void testMultiLookAndFeel() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         def oldLAF = UIManager.getLookAndFeel()
@@ -1450,10 +1616,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         } finally {
             UIManager.setLookAndFeel(oldLAF)
         }
+      }
     }
 
     void testBorders() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         // classic smoke test, try every valid combination and look for smoke...
@@ -1542,10 +1709,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
             matteBorder(javax.swing.plaf.metal.MetalIconFactory.getCheckBoxIcon(), size:9)
             matteBorder(9, icon:javax.swing.plaf.metal.MetalIconFactory.getCheckBoxIcon())
         }
+      }
     }
 
     void testBorderAttachment() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         swing.frame(id:'frame') {
@@ -1567,10 +1735,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
            raisedBevelBorder(parent:true)
         }
         assert swing.panel.border != null
+      }
     }
 
     void testImageIcon() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         String baseDir = new File("src/main").absolutePath
@@ -1655,10 +1824,11 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert swing.ii != null
         assert swing.ii.description == '<none>'
 
+      }
     }
 
     void testRenderer() {
-        if (headless) return
+      testInEDT {
         def swing = new SwingBuilder()
 
         int count = 0
@@ -1688,5 +1858,6 @@ class SwingBuilderTest extends GroovySwingTestCase {
         assert lcr2.getListCellRendererComponent(swing.ls, "x", 0, false, false) instanceof javax.swing.JLabel
         assert lcr2.getListCellRendererComponent(swing.ls, "x", 1, false, false) instanceof javax.swing.JButton
 
+      }
     }
 }

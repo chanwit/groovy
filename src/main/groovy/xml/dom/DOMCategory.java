@@ -16,10 +16,14 @@
 package groovy.xml.dom;
 
 import groovy.xml.QName;
+import groovy.lang.GroovyRuntimeException;
 import org.codehaus.groovy.runtime.DefaultGroovyMethods;
 import org.codehaus.groovy.runtime.InvokerHelper;
 import org.w3c.dom.*;
 
+import javax.xml.xpath.XPathFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathExpressionException;
 import java.util.*;
 
 /**
@@ -30,32 +34,27 @@ public class DOMCategory {
 
     private static boolean trimWhitespace = true;
 
-    public static Object get(Object o, String elementName) {
-        if (o instanceof Element) {
-            return get((Element) o, elementName);
+    public static Object get(Element element, String elementName) {
+        return xgetAt(element, elementName);
+    }
+
+    public static Object get(NodeList nodeList, String elementName) {
+        if (nodeList instanceof Element) {
+            // things like com.sun.org.apache.xerces.internal.dom.DeferredElementNSImpl
+            // do implement Element, NodeList and Node. But here we prefer element,
+            // so we force the usage of Element. Without this DOMCategoryTest may fail
+            // in strange ways
+            return xgetAt((Element)nodeList, elementName);
+        } else {
+            return xgetAt(nodeList, elementName);
         }
-        if (o instanceof NodeList) {
-            return get((NodeList) o, elementName);
-        }
-        if (o instanceof NamedNodeMap) {
-            return get((NamedNodeMap) o, elementName);
-        }
-        return InvokerHelper.getProperty(o, elementName);
     }
 
-    private static Object get(Element element, String elementName) {
-        return getAt(element, elementName);
+    public static Object get(NamedNodeMap nodeMap, String elementName) {
+        return xgetAt(nodeMap, elementName);
     }
 
-    private static Object get(NodeList nodeList, String elementName) {
-        return getAt(nodeList, elementName);
-    }
-
-    private static Object get(NamedNodeMap nodeMap, String elementName) {
-        return getAt(nodeMap, elementName);
-    }
-
-    private static Object getAt(Element element, String elementName) {
+    private static Object xgetAt(Element element, String elementName) {
         if ("..".equals(elementName)) {
             return parent(element);
         }
@@ -68,12 +67,12 @@ public class DOMCategory {
         return getChildElements(element, elementName);
     }
 
-    private static Object getAt(NodeList nodeList, String elementName) {
+    private static Object xgetAt(NodeList nodeList, String elementName) {
         List results = new ArrayList();
         for (int i = 0; i < nodeList.getLength(); i++) {
             Node node = nodeList.item(i);
             if (node instanceof Element) {
-                addResult(results, get(node, elementName));
+                addResult(results, get((Element)node, elementName));
             }
         }
         if (elementName.startsWith("@")) {
@@ -86,7 +85,7 @@ public class DOMCategory {
         return element.getAttributes();
     }
 
-    private static String getAt(NamedNodeMap namedNodeMap, String elementName) {
+    private static String xgetAt(NamedNodeMap namedNodeMap, String elementName) {
         Attr a = (Attr) namedNodeMap.getNamedItem(elementName);
         return a.getValue();
     }
@@ -109,16 +108,16 @@ public class DOMCategory {
 
     private static Node nodeGetAt(Object o, int i) {
         if (o instanceof Element) {
-            Node n = getAt((Element)o, i);
+            Node n = xgetAt((Element)o, i);
             if (n != null) return n;
         }
         if (o instanceof NodeList) {
-            return getAt((NodeList)o, i);
+            return xgetAt((NodeList)o, i);
         }
         return null;
     }
 
-    private static Node getAt(Element element, int i) {
+    private static Node xgetAt(Element element, int i) {
         if (hasChildElements(element, "*")) {
             NodeList nodeList = getChildElements(element, "*");
             return nodeList.item(i);
@@ -126,7 +125,7 @@ public class DOMCategory {
         return null;
     }
 
-    private static Node getAt(NodeList nodeList, int i) {
+    private static Node xgetAt(NodeList nodeList, int i) {
         if (i >= 0 && i < nodeList.getLength()) {
             return nodeList.item(i);
         }
@@ -141,33 +140,17 @@ public class DOMCategory {
         return node.getParentNode();
     }
 
-    public static String text(Object o) {
-        if (o instanceof Element) {
-            return text((Element) o);
+    public static String text(Node node) {
+        if (node.getNodeType() == Node.TEXT_NODE) {
+            return node.getNodeValue();
         }
-        if (o instanceof Node) {
-            Node n = (Node) o;
-            if (n.getNodeType() == Node.TEXT_NODE) {
-                return n.getNodeValue();
-            }
+        if (node.hasChildNodes()) {
+            return text(node.getChildNodes());
         }
-        if (o instanceof NodeList) {
-            return text((NodeList) o);
-        }
-        return null;
+        return "";
     }
 
-    private static String text(Element element) {
-        if (!element.hasChildNodes()) {
-            return "";
-        }
-        if (element.getFirstChild().getNodeType() != Node.TEXT_NODE) {
-            return "";
-        }
-        return element.getFirstChild().getNodeValue();
-    }
-
-    private static String text(NodeList nodeList) {
+    public static String text(NodeList nodeList) {
         StringBuffer sb = new StringBuffer();
         for (int i = 0; i < nodeList.getLength(); i++) {
             sb.append(text(nodeList.item(i)));
@@ -310,6 +293,24 @@ public class DOMCategory {
             return toString((NodeList) o);
         }
         return o.toString();
+    }
+
+    public static Object xpath(Node self, String expression, javax.xml.namespace.QName returnType) {
+        final XPath xpath = XPathFactory.newInstance().newXPath();
+        try {
+            return xpath.evaluate(expression, self, returnType);
+        } catch (XPathExpressionException e) {
+            throw new GroovyRuntimeException(e);
+        }
+    }
+
+    public static String xpath(Node self, String expression) {
+        final XPath xpath = XPathFactory.newInstance().newXPath();
+        try {
+            return xpath.evaluate(expression, self);
+        } catch (XPathExpressionException e) {
+            throw new GroovyRuntimeException(e);
+        }
     }
 
     private static String toString(NodeList self) {

@@ -15,14 +15,25 @@
  */
 package org.codehaus.groovy.reflection;
 
-import groovy.lang.*;
+import groovy.lang.Closure;
+import groovy.lang.ExpandoMetaClass;
+import groovy.lang.GroovySystem;
+import groovy.lang.MetaClass;
+import groovy.lang.MetaClassRegistry;
+import groovy.lang.MetaMethod;
 import org.codehaus.groovy.reflection.stdclasses.*;
-import org.codehaus.groovy.util.*;
+import org.codehaus.groovy.util.LazyReference;
+import org.codehaus.groovy.util.LockableObject;
+import org.codehaus.groovy.util.ManagedConcurrentMap;
+import org.codehaus.groovy.util.ManagedReference;
+import org.codehaus.groovy.util.ReferenceBundle;
 
-import java.lang.ref.SoftReference;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -30,42 +41,43 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * @author Alex.Tkachman
  */
-public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
+public class ClassInfo extends ManagedConcurrentMap.Entry<Class,ClassInfo> {
+
+    private static final Set<ClassInfo> modifiedExpandos = new HashSet<ClassInfo>();
 
     private final LazyCachedClassRef cachedClassRef;
-
-    private MetaClass strongMetaClass;
-
-    private SoftReference<MetaClass> weakMetaClass;
+    private final LazyClassLoaderRef artifactClassLoader;
+    private final LockableObject lock = new LockableObject();
+    public final int hash;
 
     private volatile int version;
 
-    private final LazyClassLoaderRef artifactClassLoader;
-
-    private static final HashSet<ClassInfo> modifiedExpandos = new HashSet<ClassInfo>();
-
-    private final LockableObject lock = new LockableObject();
-
+    private MetaClass strongMetaClass;
+    private ManagedReference<MetaClass> weakMetaClass;
     MetaMethod[] dgmMetaMethods = CachedClass.EMPTY;
-
     MetaMethod[] newMetaMethods = CachedClass.EMPTY;
+    private ManagedConcurrentMap perInstanceMetaClassMap;
+    
+    private static ReferenceBundle softBundle = ReferenceBundle.getSoftBundle();
+    private static final ClassInfoSet globalClassSet = new ClassInfoSet(softBundle);
 
-    public final int hash;
-    private ConcurrentWeakMap perInstanceMetaClassMap;
-
-    ClassInfo(ConcurrentSoftMap.Segment segment, Class klazz, int hash) {
-        super (segment, klazz, hash);
+    ClassInfo(ManagedConcurrentMap.Segment segment, Class klazz, int hash) {
+        super (softBundle, segment, klazz, hash);
 
         if (ClassInfo.DebugRef.debug)
           new DebugRef(klazz);
 
         this.hash = hash;
-        cachedClassRef = new LazyCachedClassRef(this);
-        artifactClassLoader = new LazyClassLoaderRef(this);
+        cachedClassRef = new LazyCachedClassRef(softBundle, this);
+        artifactClassLoader = new LazyClassLoaderRef(softBundle, this);
     }
 
     public int getVersion() {
         return version;
+    }
+
+    public void incVersion() {
+        version++;
     }
 
     public ExpandoMetaClass getModifiedExpando() {
@@ -87,8 +99,6 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
     public ClassLoaderForClassArtifacts getArtifactClassLoader() {
         return artifactClassLoader.get();
     }
-
-    private static final ClassInfoSet globalClassSet = new ClassInfoSet();
 
     public static ClassInfo getClassInfo (Class cls) {
         return localMap.get().get(cls);
@@ -127,7 +137,7 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
         if (answer == null) {
            weakMetaClass = null;
         } else {
-           weakMetaClass = new SoftReference<MetaClass> (answer);
+           weakMetaClass = new ManagedReference<MetaClass> (softBundle,answer);
         }
     }
 
@@ -188,8 +198,8 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
 
     public void finalizeRef() {
         setStrongMetaClass(null);
-        cachedClassRef.set(null);
-        artifactClassLoader.set(null);
+        cachedClassRef.clear();
+        artifactClassLoader.clear();
 
         super.finalizeRef();
     }
@@ -219,7 +229,7 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
             	cachedClass = new ShortCachedClass(klazz, classInfo, klazz==Short.class);
             } else if (klazz == Boolean.TYPE) {
             	cachedClass = new BooleanCachedClass(klazz, classInfo, false);
-            } else if (klazz == Character.TYPE) { 
+            } else if (klazz == Character.TYPE) {
             	cachedClass = new CharacterCachedClass(klazz, classInfo, false);
             } else if (klazz == BigInteger.class) {
             	cachedClass = new BigIntegerCachedClass(klazz, classInfo);
@@ -264,7 +274,7 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
 
         if (metaClass != null) {
             if (perInstanceMetaClassMap == null)
-              perInstanceMetaClassMap = new ConcurrentWeakMap ();
+              perInstanceMetaClassMap = new ManagedConcurrentMap(ReferenceBundle.getWeakBundle()); 
 
             perInstanceMetaClassMap.put(obj, metaClass);
         }
@@ -279,18 +289,21 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
         return perInstanceMetaClassMap != null;
     }
 
-    public static class ClassInfoSet extends ConcurrentSoftMap<Class,ClassInfo> {
-
-        public ClassInfoSet() {
+    public static class ClassInfoSet extends ManagedConcurrentMap<Class,ClassInfo> {
+        public ClassInfoSet(ReferenceBundle bundle) {
+            super(bundle);
         }
 
-        protected Segment createSegment(int cap) {
-            return new Segment(cap);
+        protected Segment createSegment(Object segmentInfo,  int cap) {
+            ReferenceBundle bundle = (ReferenceBundle) segmentInfo;
+            if (bundle==null) throw new IllegalArgumentException("bundle must not be null ");
+
+            return new Segment(bundle, cap);
         }
 
-        static final class Segment extends ConcurrentSoftMap.Segment<Class,ClassInfo> {
-            Segment(int initialCapacity) {
-                super(initialCapacity);
+        static final class Segment extends ManagedConcurrentMap.Segment<Class,ClassInfo> {
+            Segment(ReferenceBundle bundle, int initialCapacity) {
+                super(bundle, initialCapacity);
             }
 
             protected ClassInfo createEntry(Class key, int hash, ClassInfo unused) {
@@ -299,7 +312,7 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
         }
     }
 
-    private static class LocalMap extends HashMap<Class,ClassInfo> {
+    private static final class LocalMap extends HashMap<Class,ClassInfo> {
 
         private static final int CACHE_SIZE = 5;
 
@@ -371,10 +384,11 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
         }
     };
 
-    private static class LazyCachedClassRef extends LazySoftReference<CachedClass> {
+    private static class LazyCachedClassRef extends LazyReference<CachedClass> {
         private final ClassInfo info;
 
-        LazyCachedClassRef(ClassInfo info) {
+        LazyCachedClassRef(ReferenceBundle bundle, ClassInfo info) {
+            super(bundle);
             this.info = info;
         }
 
@@ -383,10 +397,11 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
         }
     }
 
-    private static class LazyClassLoaderRef extends LazySoftReference<ClassLoaderForClassArtifacts> {
+    private static class LazyClassLoaderRef extends LazyReference<ClassLoaderForClassArtifacts> {
         private final ClassInfo info;
 
-        LazyClassLoaderRef(ClassInfo info) {
+        LazyClassLoaderRef(ReferenceBundle bundle, ClassInfo info) {
+            super(bundle);
             this.info = info;
         }
 
@@ -395,22 +410,22 @@ public class ClassInfo extends ConcurrentSoftMap.Entry<Class,ClassInfo> {
         }
     }
 
-    private static class DebugRef extends FinalizableRef.DebugRef<Class> {
-        public final static boolean debug = false;
+    private static class DebugRef extends ManagedReference<Class> {
+        public static final boolean debug = false;
 
-        static final AtomicInteger count = new AtomicInteger();
+        private static final AtomicInteger count = new AtomicInteger();
 
         final String name;
 
         public DebugRef(Class klazz) {
-            super(klazz);
+            super(softBundle, klazz);
             name = klazz == null ? "<null>" : klazz.getName();
             count.incrementAndGet();
         }
 
         public void finalizeRef() {
             System.out.println(name + " unloaded " + count.decrementAndGet() + " classes kept");
-            super.finalizeRef();
+            super.finalizeReference();
         }
     }
 }

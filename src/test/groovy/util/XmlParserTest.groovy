@@ -1,8 +1,8 @@
 package groovy.util
 
-import groovy.xml.TraversalTestSupport
 import groovy.xml.GpathSyntaxTestSupport
 import groovy.xml.MixedMarkupTestSupport
+import groovy.xml.TraversalTestSupport
 
 class XmlParserTest extends GroovyTestCase {
 
@@ -163,8 +163,12 @@ p() {
         def anyTitle = new groovy.xml.QName("*", "title")
         def html = new XmlParser().parseText(bookXml)
 
-        // qname style
-        def result = html[anyName][anyHtml][anyTitle].text()
+        // string plain style
+        def result = html.head.':title'.text()
+        assert result == 'GINA Book Review'
+
+        // QName style
+        result = html[anyName][anyHtml][anyTitle].text()
         assert result == 'Groovy in Action Review'
 
         // string wildcard style
@@ -243,5 +247,11 @@ p() {
   </child>
 </root>
 '''
+    }
+
+    void testXmlParserExtensionPoints() {
+        def html = new CustomXmlParser().parseText(bookXml)
+        assert html.getClass() == CustomNode
+        assert html.name() == new Integer(42)
     }
 }

@@ -218,7 +218,7 @@ public class MetaClassHelper {
             /*Integer*/{14, 15, 12, 13, 1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,},
             /*long*/{14, 15, 12, 13, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,},
             /*Long*/{14, 15, 12, 13, 10, 11, 1, 0, 2, 3, 4, 5, 6, 7, 8, 9,},
-            /*BigInteger*/{14, 15, 12, 13, 10, 11, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7,},
+            /*BigInteger*/{9, 10, 7, 8, 5, 6, 3, 4, 0, 14, 15, 12, 13, 11, 1, 2,},
             /*float*/{14, 15, 12, 13, 10, 11, 8, 9, 7, 0, 1, 2, 3, 4, 5, 6,},
             /*Float*/{14, 15, 12, 13, 10, 11, 8, 9, 7, 1, 0, 2, 3, 4, 5, 6,},
             /*double*/{14, 15, 12, 13, 10, 11, 8, 9, 7, 5, 6, 0, 1, 2, 3, 4,},
@@ -440,8 +440,23 @@ public class MetaClassHelper {
         return ret;
     }
 
-    public static String capitalize(String property) {
-        return property.substring(0, 1).toUpperCase() + property.substring(1, property.length());
+    /**
+     * This is the complement to the java.beans.Introspector.decapitalize(String) method.
+     * We handle names that begin with an initial lowerCase followed by upperCase specially
+     * (which is to make no change).
+     * See GROOVY-3211.
+     * @param property the property name to capitalize
+     * @return the name capitalized, except when we don't
+     */
+    public static String capitalize(final String property) {
+        final String rest = property.substring(1);
+        
+        // Funky rule so that names like 'pNAME' will still work.
+        if (Character.isLowerCase(property.charAt(0)) && (rest.length() > 0) && Character.isUpperCase(rest.charAt(0))) {
+           return property;
+        }
+        
+        return property.substring(0, 1).toUpperCase() + rest;
     }
 
     /**

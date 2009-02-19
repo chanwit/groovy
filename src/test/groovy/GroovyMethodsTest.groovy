@@ -77,14 +77,22 @@ class GroovyMethodsTest extends GroovySwingTestCase {
 
     void testCombinations() {
         def lists = [['a', 'b'], [1, 2, 3]]
-        assert lists.combinations() as Set ==
-                [['a', 1], ['a', 2], ['a', 3],
+        def sets = [['a', 'b'] as Set, [1, 2, 3] as Set]
+        def expected = [['a', 1], ['a', 2], ['a', 3],
                         ['b', 1], ['b', 2], ['b', 3]] as Set
+
+        assert lists.combinations() as Set == expected
+        assert sets.combinations() as Set == expected
+        lists = [['a', 'b'], 3]
+        assert lists.combinations() as Set == [['a', 3], ['b', 3]] as Set
     }
 
     void testTranspose() {
-        def lists = [['a', 'b'], [1, 2, 3]]
-        assert lists.transpose() == [['a', 1], ['b', 2]]
+        def list1 = [['a', 'b'], [1, 2, 3]]
+        def list2 = [['a', 'b', 'c'], [1, 2]]
+        def expected = [['a', 1], ['b', 2]]
+        assert list1.transpose() == expected
+        assert list2.transpose() == expected
     }
 
     void testSum() {
@@ -690,6 +698,19 @@ class GroovyMethodsTest extends GroovySwingTestCase {
         // strings remove first - deemed most common behavior for strings
         assert 'abcda.ce' - /a.c/ == 'abcde'
         assert 'abcda.ce' - ~/a.c/ == 'da.ce'
+        // should handle nulls too
+        assert [null] - [1] == [null]
+    }
+
+    void testListSplit() {
+        def nums = 1..6
+        def (evens, odds) = nums.split{ it % 2 == 0 }
+        assert evens == [2, 4, 6]
+        assert odds == [1, 3, 5]
+        def things = ['3', 'cat', '7', 'dog', '11']
+        def (numbers, others) = things.split{ it.isNumber() }
+        assert numbers == ['3', '7', '11']
+        assert others == ['cat', 'dog']
     }
 
     void testListDerivativesAreRetainedWithCommonOperators() {

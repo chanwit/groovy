@@ -25,7 +25,7 @@ import java.lang.annotation.Target;
 
 /**
  * This is an annotaton on a class, currently just {@link ASTTransformation}.
- * This proviceds information about how and when to apply the transformation,
+ * This provides information about how and when to apply the transformation,
  * such as what phase it should be applied in.
  *
  * The allowed phase is a function of how the transformation is introduced
@@ -34,11 +34,11 @@ import java.lang.annotation.Target;
  * for the phase().  This is because the annotations are not inspected until
  * after the classes are all resolved.
  *
- * Also, only annotation types present durring the SEMANTIC_ANALYSIS phase
- * will be handleded.  Transformations adding other annotations that are
+ * Also, only annotation types present during the SEMANTIC_ANALYSIS phase
+ * will be handled.  Transformations adding other annotations that are
  * transformable will have those new annotations only considered in
  * latter phases, and only if the type was present in the source unit
- * durring SEMANTIC_ANALYSIS.
+ * during SEMANTIC_ANALYSIS.
  *
  * @author Danno Ferrin (shemnon)
  */

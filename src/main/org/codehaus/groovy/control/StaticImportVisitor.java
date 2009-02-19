@@ -18,6 +18,7 @@ package org.codehaus.groovy.control;
 import org.codehaus.groovy.ast.*;
 import org.codehaus.groovy.ast.expr.*;
 import org.codehaus.groovy.ast.stmt.Statement;
+import org.objectweb.asm.Opcodes;
 
 import java.util.*;
 
@@ -110,10 +111,6 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
         if (object instanceof VariableExpression) {
             VariableExpression ve = (VariableExpression) object;
             isExplicitThisOrSuper = !mce.isImplicitThis() && (ve.getName().equals("this") || ve.getName().equals("super"));
-            if (isExplicitThisOrSuper && currentMethod != null && currentMethod.isStatic()) {
-                addError("Non-static variable '" + ve.getName() + "' cannot be referenced from the static method " + currentMethod.getName() + ".", mce);
-                return null;
-            }
         }
 
         if (mce.isImplicitThis() || isExplicitThisOrSuper) {
@@ -127,7 +124,14 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
                 Object value = ce.getValue();
                 if (value instanceof String) {
                     String methodName = (String) value;
-                    if (inSpecialConstructorCall || currentClass.hasPossibleStaticMethod(methodName, args)) {
+                    boolean lookForPossibleStaticMethod = true;
+                    if(this.currentMethod != null && !this.currentMethod.isStatic()) {
+                        if(currentClass.hasPossibleMethod(methodName, args)) {
+                            lookForPossibleStaticMethod = false;
+                        }
+                    }
+                    if (inSpecialConstructorCall ||
+                            (lookForPossibleStaticMethod && currentClass.hasPossibleStaticMethod(methodName, args))) {
                     	StaticMethodCallExpression smce = new StaticMethodCallExpression(currentClass, methodName, args);
                     	smce.setSourcePosition(mce);
                     	return smce;
@@ -173,7 +177,7 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
         if (objectExpression instanceof ClassExpression && currentMethod != null && currentMethod.isStatic()) {
             ClassExpression ce = (ClassExpression) objectExpression;
             if (ce.getType().getName().equals(currentClass.getName())) {
-                FieldNode field = currentClass.getField(pe.getPropertyAsString());
+                FieldNode field = currentClass.getDeclaredField(pe.getPropertyAsString());
                 if (field != null && field.isStatic()) {
                     Expression expression = new FieldExpression(field);
                     expression.setSourcePosition(pe);
@@ -244,9 +248,8 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
             if (expression != null) return expression;
         }
         Map importedClasses = module.getStaticImportClasses();
-        Iterator it = importedClasses.keySet().iterator();
-        while (it.hasNext()) {
-            String className = (String) it.next();
+        for (Object o : importedClasses.keySet()) {
+            String className = (String) o;
             ClassNode node = (ClassNode) importedClasses.get(className);
             Expression expression = findStaticField(node, name);
             if (expression != null) return expression;
@@ -255,15 +258,14 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
     }
 
     private Expression findStaticField(ClassNode staticImportType, String fieldName) {
-        if (!staticImportType.isResolved() && !staticImportType.isPrimaryClassNode()) {
-            stillResolving = true;
-        }
         if (staticImportType.isPrimaryClassNode() || staticImportType.isResolved()) {
             staticImportType.getFields(); // force init
             FieldNode field = staticImportType.getField(fieldName);
             if (field != null && field.isStatic()) {
                 return new PropertyExpression(new ClassExpression(staticImportType), fieldName);
             }
+        } else {
+            stillResolving = true;
         }
         return null;
     }
@@ -285,10 +287,14 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
             if (expression != null) return expression;
         }
         Map importPackages = module.getStaticImportClasses();
-        Iterator it = importPackages.keySet().iterator();
-        while (it.hasNext()) {
-            String className = (String) it.next();
-            ClassNode starImportType = (ClassNode) importPackages.get(className);
+        for (Object o : importPackages.keySet()) {
+            String className = (String) o;
+            ClassNode starImportType = null;
+            if(isEnum(currentClass) && importPackages.containsKey(currentClass.getName())) {
+            	starImportType = (ClassNode) importPackages.get(currentClass.getName());
+            } else {
+                starImportType = (ClassNode) importPackages.get(className);
+            }
             Expression expression = findStaticMethod(starImportType, name, args);
             if (expression != null) return expression;
         }
@@ -306,5 +312,9 @@ public class StaticImportVisitor extends ClassCodeExpressionTransformer {
 
     protected SourceUnit getSourceUnit() {
         return source;
+    }
+
+    private boolean isEnum(ClassNode node) {
+        return (node.getModifiers() & Opcodes.ACC_ENUM) != 0;
     }
 }

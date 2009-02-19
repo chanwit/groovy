@@ -17,15 +17,15 @@
 
 package groovy.swing
 
+import java.awt.event.ActionEvent
 import javax.swing.DefaultBoundedRangeModel
 import javax.swing.DefaultButtonModel
-import javax.swing.JFrame
 import javax.swing.text.PlainDocument
 
 public class SwingBuilderBindingsTest extends GroovySwingTestCase {
 
     public void testSliderValueBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -59,10 +59,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         swing.slReverse.value = 21
         swing.bindingReverse.reverseUpdate()
         assert swing.sl.value == 21
+      }
     }
 
     public void testScrollBarValueBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -96,10 +97,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         swing.slReverse.value = 21
         swing.bindingReverse.reverseUpdate()
         assert swing.sl.value == 21
+      }
     }
 
     public void testTextFieldTextBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -132,10 +134,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         doc.insertString(0, '{}', null)
         swing.txts.document = doc
         assert swing.txt.text == '{}'
+      }
     }
 
     public void testCheckboxSelectedBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -168,16 +171,138 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         swing.txt.enabled = !swing.txt.enabled
         swing.binding.reverseUpdate()
         assert swing.txt.enabled == swing.cb.selected
+      }
+    }
 
+    public void testComboBoxBindSyntheticProperties() {
+      testInEDT {
+        SwingBuilder swing = new SwingBuilder()
+        def comboData = ['Alpha', 'Bravo', 'Charlie', 'Delta']
+
+        def vectorData = ['Adams', 'Boston', 'Chicago', 'Denver']
+
+
+        swing.frame() {
+            comboBox(id: 'combo01', items:comboData)
+            comboBox(id: 'combo02', model: new javax.swing.DefaultComboBoxModel(new Vector(vectorData)))
+
+            t1e  = label(text:bind {combo01.elements})
+            t1sx = label(text:bind {combo01.selectedIndex})
+            t1se = label(text:bind {combo01.selectedElement})
+            t1si = label(text:bind {combo01.selectedItem})
+
+            t2e  = label(text:bind {combo02.elements})
+            t2sx = label(text:bind {combo02.selectedIndex})
+            t2se = label(text:bind {combo02.selectedElement})
+            t2si = label(text:bind {combo02.selectedItem})
+        }
+
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '0'
+        assert swing.t1se.text == 'Alpha'
+        assert swing.t1si.text == 'Alpha'
+
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '0'
+        assert swing.t2se.text == 'Adams'
+        assert swing.t2si.text == 'Adams'
+
+
+        swing.combo01.selectedIndex = 1
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '1'
+        assert swing.t1se.text == 'Bravo'
+        assert swing.t1si.text == 'Bravo'
+
+        swing.combo02.selectedIndex = 1
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '1'
+        assert swing.t2se.text == 'Boston'
+        assert swing.t2si.text == 'Boston'
+
+        swing.combo01.selectedIndex = -1
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '-1'
+        assert swing.t1se.text == null
+        assert swing.t1si.text == null
+
+        swing.combo02.selectedIndex = -1
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '-1'
+        assert swing.t2se.text == null
+        assert swing.t2si.text == null
+
+        swing.combo01.selectedItem = 'Charlie'
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '2'
+        assert swing.t1se.text == 'Charlie'
+        assert swing.t1si.text == 'Charlie'
+
+        swing.combo02.selectedItem = 'Chicago'
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '2'
+        assert swing.t2se.text == 'Chicago'
+        assert swing.t2si.text == 'Chicago'
+
+        swing.combo01.selectedItem = 'Fox Trot'
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '2'
+        assert swing.t1se.text == 'Charlie'
+        assert swing.t1si.text == 'Charlie'
+
+        swing.combo02.selectedItem = 'Frank'
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '2'
+        assert swing.t2se.text == 'Chicago'
+        assert swing.t2si.text == 'Chicago'
+
+
+        swing.combo01.selectedElement = 'Delta'
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '3'
+        assert swing.t1se.text == 'Delta'
+        assert swing.t1si.text == 'Delta'
+
+        swing.combo02.selectedElement = 'Denver'
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '3'
+        assert swing.t2se.text == 'Denver'
+        assert swing.t2si.text == 'Denver'
+
+        swing.combo01.selectedElement = 'Golf'
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta]'
+        assert swing.t1sx.text == '3'
+        assert swing.t1se.text == 'Delta'
+        assert swing.t1si.text == 'Delta'
+
+        swing.combo02.selectedElement = 'George'
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver]'
+        assert swing.t2sx.text == '3'
+        assert swing.t2se.text == 'Denver'
+        assert swing.t2si.text == 'Denver'
+
+        swing.combo01.model.addElement('Echo')
+        assert swing.t1e.text == '[Alpha, Bravo, Charlie, Delta, Echo]'
+
+        swing.combo02.model.addElement('Easy')
+        assert swing.t2e.text == '[Adams, Boston, Chicago, Denver, Easy]'
+
+        swing.combo01.model.removeElement('Bravo')
+        assert swing.t1e.text == '[Alpha, Charlie, Delta, Echo]'
+
+        swing.combo02.model.removeElement('Adams')
+        assert swing.t2e.text == '[Boston, Chicago, Denver, Easy]'
+      }
     }
 
     public void testEventBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
-
+        def capture
         swing.actions() {
             button('Button!', id:'b')
             textField(id:'txt', text:bind(source:b, sourceEvent:'actionPerformed', sourceValue:{b.text}))
+            textField(id:'txt2', text:bind(source:b, sourceEvent:'actionPerformed', sourceValue:{evt->capture=evt; 'Captured!'}))
         }
 
         assert swing.txt.text == 'Button!'
@@ -187,10 +312,14 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         swing.b.doClick()
         //ok, now it's pressed
         assert swing.txt.text == 'Pressed!'
+        //check that we get evet as closure arg
+        assert swing.txt2.text == 'Captured!'
+        assert capture instanceof ActionEvent
+      }
     }
 
     public void testPropertyBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -222,10 +351,130 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         md.enabled = !swing.txt.enabled
         swing.cb.model = md
         assert swing.txt.enabled == swing.cb.enabled
+      }
+    }
+
+    public void testBindGroup() {
+      testInEDT {
+        SwingBuilder swing = new SwingBuilder()
+
+        int enabledChangeCount = 1
+        swing.actions() {
+            bindGroup(id:'testGroup')
+            checkBox('Button!', id:'cb')
+            textField(id:'txt1', text:bind(source:cb, sourceProperty:'text', group:testGroup))
+            textField(id:'txt2', text:bind(source:cb, sourceProperty:'text', sourceValue: {enabledChangeCount++}, group:testGroup))
+            textField(id:'txt3', text:bind(source:cb, sourceProperty:'text', group:testGroup))
+        }
+        assert swing.txt1.text == 'Button!'
+        assert swing.txt2.text == '1'
+        assert swing.txt3.text == 'Button!'
+
+        swing.testGroup.unbind()
+        swing.cb.text = 'CheckBox!'
+        swing.cb.selected = true
+
+        assert swing.txt1.text == 'Button!'
+        assert swing.txt2.text == '1'
+        assert swing.txt3.text == 'Button!'
+
+        swing.testGroup.update()
+        assert swing.txt1.text == 'CheckBox!'
+        assert swing.txt2.text == '2'
+        assert swing.txt3.text == 'CheckBox!'
+
+        swing.testGroup.bind()
+        swing.cb.text = 'ComboBox!'
+        swing.cb.selected = true
+        assert swing.txt1.text == 'ComboBox!'
+        assert swing.txt2.text == '3'
+        assert swing.txt3.text == 'ComboBox!'
+
+        // test auto-bind
+        // test explicit true
+        swing.actions() {
+            bindGroup(id:'testGroup', bind:true)
+            checkBox('Button!', id:'cb')
+            textField(id:'txt1', text:bind(source:cb, sourceProperty:'text', group:testGroup))
+        }
+
+        assert swing.txt1.text == 'Button!'
+        swing.cb.text = 'CheckBox!'
+        assert swing.txt1.text == 'CheckBox!'
+
+          // test explicit false
+        swing.actions() {
+            bindGroup(id:'testGroup', bind:false)
+            checkBox('Button!', id:'cb')
+            textField(id:'txt1', text:bind(source:cb, sourceProperty:'text', group:testGroup))
+        }
+
+        assert swing.txt1.text == 'Button!'
+        swing.cb.text = 'CheckBox!'
+        assert swing.txt1.text == 'Button!'
+
+        // test implied = true
+        swing.actions() {
+        bindGroup(id:'testGroup')
+        checkBox('Button!', id:'cb')
+        textField(id:'txt1', text:bind(source:cb, sourceProperty:'text', group:testGroup))
+        }
+
+        assert swing.txt1.text == 'Button!'
+        swing.cb.text = 'CheckBox!'
+        assert swing.txt1.text == 'CheckBox!'
+      }
+    }
+
+    public void testPropertyEventBinding() {
+      testInEDT {
+        SwingBuilder swing = new SwingBuilder()
+
+        int enabledChangeCount = 1
+        swing.actions() {
+            checkBox('Button!', id:'cb')
+            textField(id:'txtp', text:bind(source:cb, sourceProperty:'text',))
+            textField(id:'txtpv', text:bind(source:cb, sourceProperty:'text', sourceValue: {enabledChangeCount++}))
+            textField(id:'txtep', text:bind(source:cb, sourceEvent:'stateChanged', sourceProperty:'text'))
+        }
+        shouldFail {
+            swing.actions() {
+                // all three are pointless
+                textField(id:'txtepv', enabled:bind(source:cb, sourceEvent:'stateChanged', sourceProperty:'text', sourceValue: {enabledChangeCount++}))
+            }
+        }
+        shouldFail {
+            swing.actions() {
+                // just value isn't enough info
+                textField(id:'txtv', enabled:bind(source:cb, sourceValue: {enabledChangeCount++}))
+            }
+        }
+        shouldFail {
+            swing.actions() {
+                // just event isn't enough
+                textField(id:'txtepv', enabled:bind(source:cb, sourceEvent:'stateChanged'))
+            }
+        }
+
+        assert swing.txtp.text == 'Button!'
+        assert swing.txtpv.text == '1'
+        assert swing.txtep.text == 'Button!'
+
+        swing.cb.text = 'CheckBox!'
+        assert swing.txtp.text == 'CheckBox!'
+        assert swing.txtpv.text == '2'
+        assert swing.txtep.text == 'Button!'
+
+        swing.cb.selected = true
+        assert swing.txtp.text == 'CheckBox!'
+        assert swing.txtpv.text == '2'
+        assert swing.txtep.text == 'CheckBox!'
+
+      }
     }
 
     public void testReversePropertyBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -257,10 +506,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         md.enabled = !swing.txt.enabled
         swing.cb.model = md
         assert swing.txt.enabled == swing.cb.enabled
+      }
     }
 
     public void testValueNodeBinding() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -293,10 +543,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         swing.cb4.selected=false
         assert !swing.cb3.selected
         assert !swing.cb4.selected
+      }
     }
 
     public void testReversePropertyPropertites() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -306,12 +557,13 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         }
         assert swing.binding1.converter != null
         assert swing.binding2.converter == null
+      }
     }
 
     public void testConverters() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
-    
+
         swing.actions() {
             checkBox(id:'doner')
             checkBox(id:'cb1', enabled:bind(source:doner, sourceProperty:'enabled', converter: {it}, id:'binding1'))
@@ -347,10 +599,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
             }
         }
 
+      }
     }
 
     public void testPropertyValuePassthrough() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         swing.actions() {
@@ -363,10 +616,11 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
         assert swing.s1.value == 15
         // s2 is target, not source, so it's value setting should have no effect
         assert swing.s2.value == 8
+      }
     }
 
     public void testModel() {
-        if (isHeadless()) return
+      testInEDT {
         SwingBuilder swing = new SwingBuilder()
 
         def bean = new org.codehaus.groovy.runtime.DummyBean()
@@ -397,5 +651,6 @@ public class SwingBuilderBindingsTest extends GroovySwingTestCase {
 
         // old model binding could be listening...
         assert swing.textField.text != bean.name
+      }
     }
 }

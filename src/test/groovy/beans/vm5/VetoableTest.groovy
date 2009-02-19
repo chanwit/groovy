@@ -21,7 +21,7 @@ import org.codehaus.groovy.control.CompilationFailedException
 /**
  * @author Danno Ferrin (shemnon)
  */
-class VetoableTest extends GroovyTestCase {
+class VetoableTest extends GroovySwingTestCase {
 
     public void testSimpleConstrainedProperty() {
         GroovyShell shell = new GroovyShell()
@@ -113,16 +113,54 @@ class VetoableTest extends GroovyTestCase {
     }
 
     public void testExisingSetter() {
-        GroovyShell shell = new GroovyShell()
-        shouldFail(CompilationFailedException) {
-            shell.evaluate("""
-                class VetoableTestBean4 {
-                    @groovy.beans.Vetoable String name
-                    void setName() { }
-                }
-            """)
+    GroovyShell shell = new GroovyShell()
+        shell.evaluate("""
+            class VetoableTestBean4 {
+                @groovy.beans.Vetoable String name
+                void setName() { }
+            }
+            new VetoableTestBean4()
+        """)
+    }
+
+    public void testWithSettersAndGetters() {
+        for (int i = 0; i < 16; i++) {
+            boolean vetoClass = i & 1
+            boolean field = i & 2
+            boolean setter = i & 4
+            boolean getter = i & 8
+            int expectedCount = (vetoClass && !field)?2:1
+            String script = """
+                    import groovy.beans.Vetoable
+
+                    ${vetoClass?'@Vetoable ':''}class VetoableTestSettersAndGetters$i {
+
+                        @Vetoable String alwaysVetoable
+                        ${field?'protected ':''} String name
+
+                        ${setter?'':'//'}void setName(String newName) { this.@name = "x\$newName" }
+                        ${getter?'':'//'}String getName() { return this.@name }
+                    }
+                    sb = new VetoableTestSettersAndGetters$i(name:"foo", alwaysVetoable:"bar")
+                    changed = 0
+                    sb.vetoableChange = {evt ->
+                        changed++
+                    }
+                    sb.alwaysVetoable = "baz"
+                    sb.name = "bif"
+                    assert changed == $expectedCount
+                """
+            try {
+                GroovyShell shell = new GroovyShell()
+                shell.evaluate(script);
+            } catch (Throwable t) {
+                System.out.println("Failed Script: $script")
+                throw t
+            }
         }
     }
+
+
 
     public void testOnField() {
         GroovyShell shell = new GroovyShell()
@@ -130,7 +168,17 @@ class VetoableTest extends GroovyTestCase {
             shell.evaluate("""
                 class VetoableTestBean5 {
                     public @groovy.beans.Vetoable String name
-                    void setName() { }
+                }
+            """)
+        }
+    }
+
+    public void testOnStaticField() {
+        GroovyShell shell = new GroovyShell()
+        shouldFail(CompilationFailedException) {
+            shell.evaluate("""
+                class VetoableTestBean6 {
+                    @groovy.beans.Vetoable static String name
                 }
             """)
         }
@@ -177,14 +225,98 @@ class VetoableTest extends GroovyTestCase {
         }
     }
 
+    public void testExtendsComponent() {
+        testInEDT {
+            GroovyShell shell = new GroovyShell()
+            shell.evaluate("""
+                import groovy.beans.Vetoable
+
+                class VetoableTestBean7 extends javax.swing.JPanel {
+                    @Vetoable String testField
+                }
+
+                sb = new VetoableTestBean7()
+                sb.testField = "bar"
+                changed = false
+                sb.vetoableChange = {changed = true}
+                sb.testField = "foo"
+                assert changed
+            """)
+        }
+    }
+
+    public void testPrimitaveTypes() {
+        GroovyShell shell = new GroovyShell()
+        shell.evaluate("""
+                import groovy.beans.Vetoable
+
+                class VetoableTestBean8 {
+                    @Vetoable String testField
+                    @Vetoable boolean testBoolean
+                    @Vetoable byte testByte
+                    @Vetoable short testShort
+                    @Vetoable int testInt
+                    @Vetoable long testLong
+                    @Vetoable float testFloat
+                    @Vetoable double testDouble
+                }
+
+                sb = new VetoableTestBean8()
+                sb.testField = "bar"
+                int changed = 0
+                sb.vetoableChange = {changed++}
+                sb.testField = "foo"
+                sb.testBoolean = true
+                sb.testByte = 1
+                sb.testShort = 1
+                sb.testInt = 1
+                sb.testLong = 1
+                sb.testFloat = 1
+                sb.testDouble = 1
+                assert changed == 8
+            """)
+    }
+
+    public void testBadInheritance() {
+        shouldFail(CompilationFailedException) {
+            GroovyShell shell = new GroovyShell()
+            shell.evaluate("""
+                    import groovy.beans.Vetoable
+
+                    class VetoableTestBean9  {
+                        @Vetoable String testField
+                        void addVetoableChangeListener(java.beans.VetoableChangeListener l) {}
+                    }
+                    new VetoableTestBean9()
+                """)
+        }
+        shouldFail(CompilationFailedException) {
+            GroovyShell shell = new GroovyShell()
+            shell.evaluate("""
+                    import groovy.beans.Vetoable
+
+                    class VetoableTestBean10  {
+                        void addPropertyChangeListener(java.beans.VetoableChangeListener l) {}
+                    }
+
+                    class VetoableTestBean11 extends VetoableTestBean9 {
+                        @Vetoable String testField
+                    }
+
+                    new VetoableTestBean10()
+                """)
+        }
+    }
+
     public void testClassMarkers() {
-        for (int i = 0; i < 15; i++) {
+        for (int i = 0; i < 31; i++) {
             boolean bindField  = i & 1
             boolean bindClass  = i & 2
             boolean vetoField  = i & 4
             boolean vetoClass  = i & 8
-            int vetoCount = vetoClass?4:(vetoField?2:0);
-            int bindCount = bindClass?4:(bindField?2:0);
+            boolean staticField = i & 16
+            int vetoCount = vetoClass?(staticField?4:5):(vetoField?2:0);
+            int bindCount = bindClass?(staticField?4:5):(bindField?2:0);
 
             String script = """
                     import groovy.beans.Bindable
@@ -198,17 +330,20 @@ class VetoableTest extends GroovyTestCase {
                         ${bindField?'@Bindable ':''}String bind
 
                         ${vetoField?'@Vetoable ':''}${bindField?'@Bindable ':''}String both
+
+                        ${staticField?'static ':''}String staticField
                     }
 
-                    cb = new ClassMarkerBean$i(neither:'a', veto:'b', bind:'c', both:'d')
+                    cb = new ClassMarkerBean$i(neither:'a', veto:'b', bind:'c', both:'d', staticField:'e')
                     vetoCount = 0
                     bindCount = 0
                     ${bindClass|bindField?'cb.propertyChange = { bindCount++ }':''}
                     ${vetoClass|vetoField?'cb.vetoableChange = { vetoCount++ }':''}
-                    cb.neither = 'e'
-                    cb.bind = 'f'
-                    cb.veto = 'g'
-                    cb.both = 'h'
+                    cb.neither = 'f'
+                    cb.bind = 'g'
+                    cb.veto = 'h'
+                    cb.both = 'i'
+                    cb.staticField = 'j'
                     assert vetoCount == $vetoCount
                     assert bindCount == $bindCount
                 """

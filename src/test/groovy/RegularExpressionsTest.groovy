@@ -21,6 +21,7 @@ class RegularExpressionsTest extends GroovyTestCase {
         assert !("cheesecheese" ==~ "cheese")
     }
 
+    // The find operator is: =~
     void testFindOperator() {
         assert "cheese" =~ "cheese"
 
@@ -47,22 +48,94 @@ class RegularExpressionsTest extends GroovyTestCase {
         m.find()
         assert m.group() == "ee"
     }
+    
+    // From the javadoc of the getAt() method     
+    void testMatcherWithIntIndex() {
+        def p = /ab[d|f]/
+        def m = "abcabdabeabf" =~ p
+        assert 2 == m.count
+        assert 2 == m.size() // synonym for m.getCount()
+        assert ! m.hasGroup()
+        assert 0 == m.groupCount()
+        def matches = ["abd", "abf"]
+        for (i in 0 ..< m.count) {
+            assert m[i] == matches[i]
+        }
 
-    void testFindOperatorWithIndexAndRanges() {
+        p = /(?:ab([c|d|e|f]))/
+        m = "abcabdabeabf" =~ p
+        assert 4 == m.count
+        assert m.hasGroup()
+        assert 1 == m.groupCount()
+        matches = [["abc", "c"], ["abd", "d"], ["abe", "e"], ["abf", "f"]]
+        for (i in 0 ..< m.count) {
+            assert m[i] == matches[i]
+        }
+
+        m = "abcabdabeabfabxyzabx" =~ /(?:ab([d|x-z]+))/
+        assert 3 == m.count
+        assert m.hasGroup()
+        assert 1 == m.groupCount()
+        matches = [["abd", "d"], ["abxyz", "xyz"], ["abx", "x"]]
+        for (i in 0 ..< m.count) {
+            assert m[i] == matches[i]
+        }
+    }
+
+    void testMatcherWithIndexAndRanges() {
         def string = "cheesecheese"
         def matcher = string =~ "e+"
 
-        def value = matcher[2]
-        assert value == "ee"
+        assert "ee" == matcher[2]
+        assert ["ee", "e"] == matcher[2..3] 
+        assert ["ee", "ee"] == matcher[0, 2]
+        assert ["ee", "e", "ee"] == matcher[0, 1..2]
+        
+        matcher = "cheese please" =~ /([^e]+)e+/
+        assert ["se", "s"] == matcher[1]
+        assert [["se", "s"], [" ple", " pl"]] == matcher[1, 2]
+        assert [["se", "s"], [" ple", " pl"]] == matcher[1 .. 2]
+        assert [["chee", "ch"], [" ple", " pl"], ["ase", "as"]] == matcher[0, 2..3]
+        
+        matcher = "cheese please" =~ /([^e]+)e+/
+        shouldFail { matcher[0, [1, 2]] }
+    }
+    
+    void testMatcherIterator() {
+        def matcher = "cheesecheese" =~ "e+"
+        def iter = matcher.iterator()
+        assert iter instanceof Iterator
+        assert iter.hasNext()
+        assert "ee" == iter.next()
+        assert iter.hasNext()
+        assert "e" == iter.next()
+        assert iter.hasNext()
+        assert "ee" == iter.next()
+        assert iter.hasNext()
+        assert "e" == iter.next()
+        assert ! iter.hasNext()
+        shouldFail(NoSuchElementException.class, { iter.next() })
 
-        value = matcher[2..3]
-        assert value == "eee"
+        matcher = "cheese please" =~ /([^e]+)e+/
+        iter = matcher.iterator()
+        assert iter instanceof Iterator
+        assert iter.hasNext()
+        assert ["chee", "ch"] == iter.next()
+        assert iter.hasNext()
+        assert ["se", "s"] == iter.next()
+        assert iter.hasNext()
+        assert [" ple", " pl"] == iter.next()
+        assert iter.hasNext()
+        assert ["ase", "as"] == iter.next()
+        assert ! iter.hasNext()
+        shouldFail(NoSuchElementException.class, { iter.next() })
+        
+        // collect() uses iterator
+        matcher = "cheesecheese" =~ "e+"
+        assert ["ee", "e", "ee", "e"] == matcher.collect { it }
 
-        value = matcher[0, 2]
-        assert value == "eeee"
-
-        value = matcher[0, 1..2]
-        assert value == "eeeee"
+        matcher = "cheese please" =~ /([^e]+)e+/
+        assert [["chee", "ch"], ["se", "s"], [" ple", " pl"], ["ase", "as"]] == matcher.collect { it }
     }
 
     void testMatcherEach() {
@@ -77,6 +150,48 @@ class RegularExpressionsTest extends GroovyTestCase {
         ("cheesecheese" =~ "ee+").each { result += it; count = count + 1}
         assert count == 2
         assert result == ['ee', 'ee']
+
+        def matcher = "cheese please" =~ /([^e]+)e+/
+        def resultAll = []
+        def resultGroup = []
+        matcher.each { a, g ->
+            resultAll << a
+            resultGroup << g
+        }
+        assert ["chee", "se", " ple", "ase"] == resultAll
+        assert ["ch", "s", " pl", "as"] == resultGroup
+        
+        matcher = "cheese please" =~ /([^e]+)e+/
+        result = []
+        matcher.each { result << it }
+        assert [["chee", "ch"], ["se", "s"], [" ple", " pl"], ["ase", "as"]] == result
+    }
+        
+    // Check consistency between each and collect
+    void testMatcherEachVsCollect() {
+        def matcher = "cheese cheese" =~ "e+"
+        def result = []
+        matcher.each { result << it }
+        matcher.reset()
+        assert result == matcher.collect { it }
+
+        matcher = "cheese please" =~ /([^e]+)e+/
+        result = []
+        matcher.each { result << it }
+        matcher.reset()
+        assert result == matcher.collect { it }
+
+        matcher = "cheese please" =~ /([^e]+)e+/
+        result = []
+        matcher.each { a, g -> result << a }
+        matcher.reset()
+        assert result == matcher.collect { a, g -> a }
+
+        matcher = "cheese please" =~ /([^e]+)e+/
+        result = []
+        matcher.each { a, g -> result << g }
+        matcher.reset()
+        assert result == matcher.collect { a, g -> g }
     }
 
     void testSimplePattern() {
@@ -271,5 +386,25 @@ class RegularExpressionsTest extends GroovyTestCase {
             result += "$it:${m[it]}"
         }
         assert result == ['0:[abd, d]', '1:[abxyz, xyz]', '2:[abx, x]']
+    }
+    
+    void testReplaceAllClosure() {
+        def p = /([^z]*)(z)/
+        def c = { all, m, d -> m }
+        assert 'x12345' == 'x123z45'.replaceAll(p, c)
+        assert '12345' == '12345z'.replaceAll(p, c)
+        assert '12345' == 'z12345z'.replaceAll(p, c)
+        assert '12345' == 'z12z345z'.replaceAll(p, c)
+        assert '12345' == 'zz12z3zz45z'.replaceAll(p, c)
+        assert '12345' == 'z12z3zzz45z'.replaceAll(p, c)
+        assert '12345' == '12345'.replaceAll(p, c)
+        assert '$1$2345' == 'z$1$2345'.replaceAll(p, c)
+        assert '1$2345$' == 'z1$2345$'.replaceAll(p, c)
+        assert '2345\\' == '23z45zz\\'.replaceAll(p, c)
+        assert 'x1\\2345' == 'x1\\23z4zz5'.replaceAll(p, c)
+        assert '\\2345' == '\\23z45zzz'.replaceAll(p, c)
+        assert '\\2345\\' == '\\23z45\\'.replaceAll(p, c)
+        assert '\\23\\\\45\\' == '\\23\\\\45\\'.replaceAll(p, c)
+        assert '$\\23\\$\\45\\' == '$\\23\\$\\45\\'.replaceAll(p, c)
     }
 }

@@ -36,19 +36,54 @@ import groovy.lang.GroovyObject;
  * Represents a class in the AST.<br/>
  * A ClassNode should be created using the methods in ClassHelper.
  * This ClassNode may be used to represent a class declaration or
- * any other type. This class uses a proxy meschanism allowing to
- * create a class for a plain name at ast creation time. In another
+ * any other type. This class uses a proxy mechanism allowing to
+ * create a class for a plain name at AST creation time. In another
  * phase of the compiler the real ClassNode for the plain name may be
  * found. To avoid the need of exchanging this ClassNode with an
  * instance of the correct ClassNode the correct ClassNode is set as
  * redirect. Most method calls are then redirected to that ClassNode.
  * <br>
- * <b>Note:</b> the proxy mechanism is only allowed for classes being marked
- * as primary ClassNode which means they represent no actual class.
- * The redirect itself can be any type of ClassNode
+ * There are three types of ClassNodes:
  * <br>
- * To descirbe generic type signature see {@link #getGenericsTypes()} and
- * {@link #setGenericsTypes(GenericsType[])}. These emthods are not proxied,
+ * <ol>
+ * <li> Primary ClassNodes:<br>
+ * A primary ClassNode is one where we have a source representation
+ * which is to be compiled by Groovy and which we have an AST for. 
+ * The groovy compiler will output one class for each such ClassNode
+ * that passes through AsmBytecodeGenerator... not more, not less.
+ * That means for example Closures become such ClassNodes too at
+ * some point. 
+ * 
+ * <li> ClassNodes create through different sources (typically created
+ * from a java.lang.reflect.Class object):<br>
+ * The compiler will not output classes from these, the methods
+ * usually do not contain bodies. These kind of ClassNodes will be
+ * used in different checks, but not checks that work on the method 
+ * bodies. For example if such a ClassNode is a super class to a primary
+ * ClassNode, then the abstract method test and others will be done 
+ * with data based on these. Theoretically it is also possible to mix both 
+ * (1 and 2) kind of classes in a hierarchy, but this probably works only
+ *  in the newest Groovy versions. Such ClassNodes normally have to
+ *  isResolved() returning true without having a redirect.In the Groovy 
+ *  compiler the only version of this, that exists, is a ClassNode created 
+ *  through a Class instance
+ *
+ * <li> Labels:<br>
+ * ClassNodes created through ClassHelper.makeWithoutCaching. They 
+ * are place holders, its redirect points to the real structure, which can
+ * be a label too, but following all redirects it should end with a ClassNode
+ * from one of the other two categories. If ResolveVisitor finds such a 
+ * node, it tries to set the redirects. Any such label created after 
+ * ResolveVisitor has done its work needs to have a redirect pointing to 
+ * case 1 or 2. If not the compiler may react strange... this can be considered 
+ * as a kind of dangling pointer. 
+ * <br>
+ * <b>Note:</b> the redirect mechanism is only allowed for classes 
+ * that are not primary ClassNodes. Typically this is done for classes
+ * created by name only.  The redirect itself can be any type of ClassNode.
+ * <br>
+ * To describe generic type signature see {@link #getGenericsTypes()} and
+ * {@link #setGenericsTypes(GenericsType[])}. These methods are not proxied,
  * they describe the type signature used at the point of declaration or the
  * type signatures provided by the class. If the type signatures provided
  * by the class are needed, then a call to {@link #redirect()} will help.
@@ -60,7 +95,6 @@ import groovy.lang.GroovyObject;
  * @version $Revision$
  */
 public class ClassNode extends AnnotatedNode implements Opcodes {
-
     private static class MapOfLists {
         private Map map = new HashMap();
         public List get(Object key) {
@@ -198,7 +232,7 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
 
     /**
      * Creates a ClassNode from a real class. The resulting
-     * ClassNode will be no primary ClassNode.
+     * ClassNode will not be a primary ClassNode.
      */
     public ClassNode(Class c) {
         this(c.getName(), c.getModifiers(), null, null ,MixinNode.EMPTY_ARRAY);
@@ -211,7 +245,7 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
 
     /**
      * The complete class structure will be initialized only when really
-     * needed to avoid having too much objects during compilation
+     * needed to avoid having too many objects during compilation
      */
     private void lazyClassInit() {
         synchronized (lazyInitLock) {
@@ -337,41 +371,18 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
      * this ClassNode
      */
     public List getAbstractMethods() {
-
-        HashSet abstractNodes = new HashSet();
-        // let us collect the abstract super classes and stop at the
-        // first non abstract super class. If such a class still
-        // contains abstract methods, then loading that class will fail.
-        // No need to be extra careful here for that.
-        ClassNode parent = this.redirect();
-        do {
-            abstractNodes.add(parent);
-            ClassNode[] interfaces = parent.getInterfaces();
-            List interfaceList = new ArrayList(Arrays.asList(interfaces));
-            while (!interfaceList.isEmpty()) {
-                final ClassNode interfaceNode = (ClassNode) interfaceList.get(0);
-                interfaceList.remove(0);
-                abstractNodes.add(interfaceNode.redirect());
-                interfaceList.addAll(Arrays.asList(interfaceNode.getInterfaces()));
-            }
-            parent = parent.getSuperClass().redirect();
-        } while (parent!=null && ((parent.getModifiers() & Opcodes.ACC_ABSTRACT) != 0));
-
-        List result = new ArrayList();
-        for (Iterator methIt = getAllDeclaredMethods().iterator(); methIt.hasNext();) {
-            MethodNode method = (MethodNode) methIt.next();
-            // add only abstract methods from abtract classes that
-            // are not overwritten
-            if ( abstractNodes.contains(method.getDeclaringClass().redirect()) &&
-                 (method.getModifiers() & Opcodes.ACC_ABSTRACT) != 0
-               ) {
+        List result = new ArrayList(3);
+        Map declaredMethods = getDeclaredMethodsMap();
+        for (Iterator it = declaredMethods.values().iterator(); it.hasNext();) {
+            MethodNode method = (MethodNode) it.next();
+            if (method.isAbstract()) {
                 result.add(method);
             }
         }
+        
         if (result.isEmpty()) {
             return null;
-        }
-        else {
+        } else {
             return result;
         }
     }
@@ -380,15 +391,30 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         return new ArrayList(getDeclaredMethodsMap().values());
     }
 
+    public Set getAllInterfaces () {
+        Set res = new HashSet ();
+        getAllInterfaces(res);
+        return res;
+    }
 
-    protected Map getDeclaredMethodsMap() {
+    private void getAllInterfaces(Set res) {
+        if (isInterface())
+          res.add(this);
+        
+        ClassNode[] interfaces = getInterfaces();
+        for (int i = 0; i < interfaces.length; i++) {
+            res.add(interfaces[i]);
+            interfaces[i].getAllInterfaces(res);
+        }
+    }
+
+    public Map getDeclaredMethodsMap() {
         // Start off with the methods from the superclass.
         ClassNode parent = getSuperClass();
         Map result = null;
         if (parent != null) {
             result = parent.getDeclaredMethodsMap();
-        }
-        else {
+        } else {
             result = new HashMap();
         }
 
@@ -397,8 +423,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         for (int i = 0; i < interfaces.length; i++) {
             ClassNode iface = interfaces[i];
             Map ifaceMethodsMap = iface.getDeclaredMethodsMap();
-            for (Iterator iter = ifaceMethodsMap.keySet().iterator(); iter.hasNext();) {
-                String methSig = (String) iter.next();
+            for (Object o : ifaceMethodsMap.keySet()) {
+                String methSig = (String) o;
                 if (!result.containsKey(methSig)) {
                     MethodNode methNode = (MethodNode) ifaceMethodsMap.get(methSig);
                     result.put(methSig, methNode);
@@ -407,8 +433,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         }
 
         // And add in the methods implemented in this class.
-        for (Iterator iter = getMethods().iterator(); iter.hasNext();) {
-            MethodNode method = (MethodNode) iter.next();
+        for (Object o : getMethods()) {
+            MethodNode method = (MethodNode) o;
             String sig = method.getTypeDescriptor();
             result.put(sig, method);
         }
@@ -460,7 +486,6 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         node.setDeclaringClass(redirect());
         FieldNode field = node.getField();
         addField(field);
-
         redirect().properties.add(node);
     }
 
@@ -470,17 +495,17 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
                                     Expression initialValueExpression,
                                     Statement getterBlock,
                                     Statement setterBlock) {
-    	for (Iterator iter = getProperties().iterator(); iter.hasNext();) {
-            PropertyNode pn = (PropertyNode) iter.next();
+        for (Object o : getProperties()) {
+            PropertyNode pn = (PropertyNode) o;
             if (pn.getName().equals(name)) {
                 if (pn.getInitialExpression() == null && initialValueExpression != null)
-                  pn.getField().setInitialValueExpression(initialValueExpression);
+                    pn.getField().setInitialValueExpression(initialValueExpression);
 
                 if (pn.getGetterBlock() == null && getterBlock != null)
-                  pn.setGetterBlock(getterBlock);
+                    pn.setGetterBlock(getterBlock);
 
                 if (pn.getSetterBlock() == null && setterBlock != null)
-                  pn.setSetterBlock(setterBlock);
+                    pn.setSetterBlock(setterBlock);
 
                 return pn;
             }
@@ -496,8 +521,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
     }
     
     public PropertyNode getProperty(String name) {
-    	for (Iterator iter = getProperties().iterator(); iter.hasNext();) {
-            PropertyNode pn = (PropertyNode) iter.next();
+    	for (Object o : getProperties()) {
+            PropertyNode pn = (PropertyNode) o;
             if (pn.getName().equals(name)) return pn;
         }
         return null;   	
@@ -602,6 +627,11 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         return (cn.getName().equals(getName()));
     }
 
+    public int hashCode() {
+        if (redirect!=null) return redirect().hashCode();
+        return getName().hashCode();
+    }
+
     public void addMixin(MixinNode mixin) {
         // lets check if it already uses a mixin
         MixinNode[] mixins = redirect().mixins;
@@ -619,8 +649,30 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         }
     }
 
-    public FieldNode getField(String name) {
+    /**
+     * Finds a field matching the given name in this class.
+     *
+     * @param name the name of the field of interest
+     * @return the method matching the given name and parameters or null
+     */
+    public FieldNode getDeclaredField(String name) {
         return (FieldNode) redirect().fieldIndex.get(name);
+    }
+
+    /**
+     * Finds a field matching the given name in this class or a parent class.
+     *
+     * @param name the name of the field of interest
+     * @return the method matching the given name and parameters or null
+     */
+    public FieldNode getField(String name) {
+        ClassNode node = this;
+        while (node != null) {
+            FieldNode fn = node.getDeclaredField(name);
+            if (fn != null) return fn;
+            node = node.getSuperClass();
+        }
+        return null;
     }
 
     /**
@@ -703,9 +755,12 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
      * @see #getDeclaredMethods(String)
      */
     public List getMethods(String name) {
-        List answer = new ArrayList(getDeclaredMethods(name));
-        ClassNode parent = getSuperClass();
-        if (parent!=null) answer.addAll(parent.getMethods(name));
+        List answer = new ArrayList();
+        ClassNode node = this;
+        while (node != null) {
+            answer.addAll(node.getDeclaredMethods(name));
+            node = node.getSuperClass();
+        }
         return answer;
     }
 
@@ -715,9 +770,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
      * @return the method matching the given name and parameters or null
      */
     public MethodNode getDeclaredMethod(String name, Parameter[] parameters) {
-        List list = getDeclaredMethods(name);
-        for (Iterator iter = list.iterator(); iter.hasNext();) {
-            MethodNode method = (MethodNode) iter.next();
+        for (Object o :  getDeclaredMethods(name)) {
+            MethodNode method = (MethodNode) o;
             if (parametersEqual(method.getParameters(), parameters)) {
                 return method;
             }
@@ -732,9 +786,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
      * @return the method matching the given name and parameters or null
      */
     public MethodNode getMethod(String name, Parameter[] parameters) {
-        List list = getMethods(name);
-        for (Iterator iter = list.iterator(); iter.hasNext();) {
-            MethodNode method = (MethodNode) iter.next();
+        for (Object o : getMethods(name)) {
+            MethodNode method = (MethodNode) o;
             if (parametersEqual(method.getParameters(), parameters)) {
                 return method;
             }
@@ -891,32 +944,31 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
     }
 
     public void visitContents(GroovyClassVisitor visitor) {
-
-        // now lets visit the contents of the class
-        for (Iterator iter = getProperties().iterator(); iter.hasNext();) {
-            PropertyNode pn = (PropertyNode) iter.next();
+        // now let's visit the contents of the class
+        for (Object o : getProperties()) {
+            PropertyNode pn = (PropertyNode) o;
             visitor.visitProperty(pn);
         }
 
-        for (Iterator iter = getFields().iterator(); iter.hasNext();) {
-            FieldNode fn = (FieldNode) iter.next();
+        for (Object o : getFields()) {
+            FieldNode fn = (FieldNode) o;
             visitor.visitField(fn);
         }
 
-        for (Iterator iter = getDeclaredConstructors().iterator(); iter.hasNext();) {
-            ConstructorNode cn = (ConstructorNode) iter.next();
+        for (Object o : getDeclaredConstructors()) {
+            ConstructorNode cn = (ConstructorNode) o;
             visitor.visitConstructor(cn);
         }
 
-        for (Iterator iter = getMethods().iterator(); iter.hasNext();) {
-            MethodNode mn = (MethodNode) iter.next();
+        for (Object o : getMethods()) {
+            MethodNode mn = (MethodNode) o;
             visitor.visitMethod(mn);
         }
     }
 
     public MethodNode getGetterMethod(String getterName) {
-        for (Iterator iter = getDeclaredMethods(getterName).iterator(); iter.hasNext();) {
-            MethodNode method = (MethodNode) iter.next();
+        for (Object o : getDeclaredMethods(getterName)) {
+            MethodNode method = (MethodNode) o;
             if (getterName.equals(method.getName())
                     && ClassHelper.VOID_TYPE!=method.getReturnType()
                     && method.getParameters().length == 0) {
@@ -929,8 +981,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
     }
 
     public MethodNode getSetterMethod(String setterName) {
-        for (Iterator iter = getDeclaredMethods(setterName).iterator(); iter.hasNext();) {
-            MethodNode method = (MethodNode) iter.next();
+        for (Object o : getDeclaredMethods(setterName)) {
+            MethodNode method = (MethodNode) o;
             if (setterName.equals(method.getName())
                     && ClassHelper.VOID_TYPE==method.getReturnType()
                     && method.getParameters().length == 1) {
@@ -974,22 +1026,26 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
 
     public String toString() {
         String ret = getName();
-        if (genericsTypes!=null) {
+        if (genericsTypes != null) {
             ret += " <";
             for (int i = 0; i < genericsTypes.length; i++) {
-                if (i!=0) ret+=", ";
+                if (i != 0) ret += ", ";
                 ret += genericsTypes[i];
             }
             ret += ">";
         }
-        if (redirect!=null) {
-            ret += " -> "+redirect().toString();
+        if (redirect != null) {
+            ret += " -> " + redirect().toString();
         }
         return ret;
     }
 
     /**
-     * Returns true if the given method has a possibly matching method with the given name and arguments
+     * Returns true if the given method has a possibly matching instance method with the given name and arguments.
+     *
+     * @param name      the name of the method of interest
+     * @param arguments the arguments to match against
+     * @return true if a matching method was found
      */
     public boolean hasPossibleMethod(String name, Expression arguments) {
         int count = 0;
@@ -1001,8 +1057,8 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
         }
         ClassNode node = this;
         do {
-            for (Iterator iter = getDeclaredMethods(name).iterator(); iter.hasNext();) {
-                MethodNode method = (MethodNode) iter.next();
+            for (Object o : getMethods(name)) {
+                MethodNode method = (MethodNode) o;
                 if (method.getParameters().length == count) {
                     return true;
                 }
@@ -1020,43 +1076,40 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
             TupleExpression tuple = (TupleExpression) arguments;
             // TODO this won't strictly be true when using list expansion in argument calls
             count = tuple.getExpressions().size();
-        }
-        else
-          return null;
+        } else
+            return null;
 
         MethodNode res = null;
         ClassNode node = this;
         TupleExpression args = (TupleExpression) arguments;
         do {
-            for (Iterator iter = node.getDeclaredMethods(name).iterator(); iter.hasNext();) {
-                MethodNode method = (MethodNode) iter.next();
+            for (Object o : node.getMethods(name)) {
+                MethodNode method = (MethodNode) o;
                 if (method.getParameters().length == count) {
                     boolean match = true;
                     for (int i = 0; i != count; ++i)
-                      if (!args.getType().isDerivedFrom(method.getParameters()[i].getType())) {
-                          match = false;
-                          break;
-                      }
+                        if (!args.getType().isDerivedFrom(method.getParameters()[i].getType())) {
+                            match = false;
+                            break;
+                        }
 
                     if (match) {
                         if (res == null)
-                          res = method;
+                            res = method;
                         else {
-                          if (res.getParameters().length != count)
-                            return null;
+                            if (res.getParameters().length != count)
+                                return null;
+                            if (node.equals(this))
+                                return null;
 
-                          if (node.equals(this))
-                            return null;
-
-                          match = true;
-                          for (int i = 0; i != count; ++i)
-                            if (!res.getParameters()[i].getType().equals(method.getParameters()[i].getType())) {
-                                match = false;
-                                break;
-                            }
-
-                          if (!match)
-                            return null;
+                            match = true;
+                            for (int i = 0; i != count; ++i)
+                                if (!res.getParameters()[i].getType().equals(method.getParameters()[i].getType())) {
+                                    match = false;
+                                    break;
+                                }
+                            if (!match)
+                                return null;
                         }
                     }
                 }
@@ -1069,7 +1122,11 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
     }
 
     /**
-     * Returns true if the given method has a possibly matching static method with the given name and arguments
+     * Returns true if the given method has a possibly matching static method with the given name and arguments.
+     *
+     * @param name      the name of the method of interest
+     * @param arguments the arguments to match against
+     * @return true if a matching method was found
      */
     public boolean hasPossibleStaticMethod(String name, Expression arguments) {
         int count = 0;
@@ -1079,15 +1136,29 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
             // TODO this won't strictly be true when using list expansion in argument calls
             count = tuple.getExpressions().size();
         }
-        for (Iterator iter = getDeclaredMethods(name).iterator(); iter.hasNext();) {
-            MethodNode method = (MethodNode) iter.next();
-            if (method.getParameters().length == count && method.isStatic()) {
-                return true;
-            }
-            // handle varargs case
-            if (method.isStatic() && method.getParameters().length > 0 &&
-                method.getParameters()[method.getParameters().length - 1].getType().isArray()) {
-                if (count >= method.getParameters().length - 1) return true;
+        
+        for (Object o : getMethods(name)) {
+            MethodNode method = (MethodNode) o;
+            if(method.isStatic()) {
+                Parameter[] parameters = method.getParameters(); 
+                if (parameters.length == count) return true;
+
+                // handle varargs case
+                if (parameters.length > 0 && parameters[parameters.length - 1].getType().isArray()) {
+                    if (count >= parameters.length - 1) return true;
+                }
+                
+                // handle parameters with default values
+                int nonDefaultParameters = 0;
+                for(int i = 0; i < parameters.length; i++) {
+                	if(parameters[i].hasInitialExpression() == false) {
+                		nonDefaultParameters++;
+                	}
+                }
+                
+            	if(count < parameters.length && nonDefaultParameters <= count) {
+            		return true;
+            	}
             }
         }
         return false;
@@ -1201,5 +1272,10 @@ public class ClassNode extends AnnotatedNode implements Opcodes {
 
     public Map<Class <? extends ASTTransformation>, Set<ASTNode>> getTransforms(CompilePhase phase) {
         return transformInstances.get(phase);
+    }
+
+    public void renameField(String oldName, String newName) {
+        final Map index = redirect().fieldIndex;
+        index.put(newName, index.remove(oldName));
     }
 }

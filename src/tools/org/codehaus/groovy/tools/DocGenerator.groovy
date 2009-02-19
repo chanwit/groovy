@@ -167,7 +167,7 @@ class DocGenerator {
                             'class': packageName + '.' + simpleClassName,
                             'method': method,
                             'parametersSignature': getParametersDecl(method),
-                            'shortComment': getComment(method).replaceAll('\\..*', ''),
+                            'shortComment': getFirstSentence(getComment(method)),
                     ])
                 }
             }
@@ -194,6 +194,17 @@ class DocGenerator {
         return indexMap
     }
 
+    private getFirstSentence(text) {
+        def boundary = java.text.BreakIterator.getSentenceInstance(Locale.getDefault()) // todo - allow locale to be passed in
+        boundary.setText(text)
+        int start = boundary.first()
+        int end = boundary.next()
+        if (start > -1 && end > -1) {
+            text = text.substring(start, end)
+        }
+        text
+    }
+
     private generateClassDetails(template, curPackage, aClass) {
         def packagePath = generatePackagePath(curPackage)
         def dir = new File(outputFolder, packagePath)
@@ -214,14 +225,15 @@ class DocGenerator {
             def methodInfo = [
                     name: method.name,
                     comment: getComment(method),
-                    shortComment: getComment(method).replaceAll('\\..*', ''),
+                    shortComment: getFirstSentence(getComment(method)),
                     returnComment: method.getTagByName("return")?.getValue() ?: '',
                     seeComments: seeComments,
                     returnTypeDocUrl: getDocUrl(returnType),
                     parametersSignature: getParametersDecl(method),
                     parametersDocUrl: getParametersDocUrl(method),
                     parameters: parameters,
-                    isStatic: method.parentClass.name == 'DefaultGroovyStaticMethods'
+                    isStatic: method.parentClass.name == 'DefaultGroovyStaticMethods',
+                    since: method.getTagByName("since")?.getValue() ?: null
             ]
             methods << methodInfo
         }
@@ -256,11 +268,11 @@ class DocGenerator {
             title = "Groovy class in $packageName"
         }
         else {
-            apiBaseUrl = "http://java.sun.com/j2se/1.4.2/docs/api/"
+            apiBaseUrl = "http://java.sun.com/j2se/1.5.0/docs/api/"
             title = "JDK class in $packageName"
         }
 
-        def url = apiBaseUrl + target[0].replaceAll(/\./, "/") + '.html' + (target.size() > 1 ? '#' + target[1] : '')
+        def url = apiBaseUrl + target[0].replace('.', '/') + '.html' + (target.size() > 1 ? '#' + target[1] : '')
         return "<a href='$url' title='$title'>$shortClassName</a>"
     }
 
@@ -372,6 +384,6 @@ class DocGenerator {
     }
 
     private static File getSourceFile(String classname) {
-        new File("src/main/" + classname.replaceAll(/\./, "/") + ".java")
+        new File("src/main/" + classname.replace('.', '/') + ".java")
     }
 }

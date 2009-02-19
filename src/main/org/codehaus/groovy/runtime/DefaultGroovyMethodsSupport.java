@@ -15,18 +15,22 @@
  */
 package org.codehaus.groovy.runtime;
 
-import groovy.lang.IntRange;
 import groovy.lang.EmptyRange;
+import groovy.lang.IntRange;
 import org.codehaus.groovy.runtime.typehandling.DefaultTypeTransformation;
 
-import java.util.*;
+import java.io.Closeable;
+import java.io.IOException;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
+import java.util.*;
+import java.util.logging.Logger;
 
 /**
  * Support methods for DefaultGroovyMethods and PluginDefaultMethods.
  */
 public class DefaultGroovyMethodsSupport {
+
+    private static final Logger LOG = Logger.getLogger(DefaultGroovyMethodsSupport.class.getName());
 
     // helper method for getAt and putAt
     protected static RangeInfo subListBorders(int size, IntRange range) {
@@ -65,6 +69,36 @@ public class DefaultGroovyMethodsSupport {
             throw new ArrayIndexOutOfBoundsException("Negative array index [" + temp + "] too large for array size " + size);
         }
         return i;
+    }
+
+    /**
+     * Close the Closeable. Logging a warning if any problems occur.
+     *
+     * @param c the thing to close
+     */
+    public static void closeWithWarning(Closeable c) {
+        if (c != null) {
+            try {
+                c.close();
+            } catch (IOException e) {
+                LOG.warning("Caught exception during close(): " + e);
+            }
+        }
+    }
+
+    /**
+     * Close the Closeable. Ignore any problems that might occur.
+     *
+     * @param c the thing to close
+     */
+    public static void closeQuietly(Closeable c) {
+        if (c != null) {
+            try {
+                c.close();
+            } catch (IOException e) {
+                /* ignore */
+            }
+        }
     }
 
     protected static class RangeInfo {
@@ -158,59 +192,84 @@ public class DefaultGroovyMethodsSupport {
         return new HashSet();
     }
 
+    protected static Map createSimilarMap(Map orig) {
+        Map answer = createMapFromClass(orig);
+        if (answer != null) return answer;
+
+        // fall back to some defaults
+        if (orig instanceof SortedMap) {
+            return new TreeMap();
+        }
+        if (orig instanceof Properties) {
+            return new Properties();
+        }
+        if (orig instanceof Hashtable) {
+            return new Hashtable();
+        }
+        return new LinkedHashMap();
+    }
+
     private static Collection createCollectionFromClass(Collection orig) {
-        try {
-            final Constructor constructor = orig.getClass().getConstructor();
-            return (Collection) constructor.newInstance();
-        } catch (Exception e) {
-            // ignore
+        if (orig instanceof AbstractCollection) {
+            try {
+                final Constructor constructor = orig.getClass().getConstructor();
+                return (Collection) constructor.newInstance();
+            } catch (Exception e) {
+                // ignore
+            }
         }
         return null;
     }
 
     private static Collection cloneCollectionFromClass(Collection orig) {
-        try {
-            final Constructor constructor = orig.getClass().getConstructor(Collection.class);
-            return (Collection) constructor.newInstance(orig);
-        } catch (Exception e) {
-            // ignore
-        }
-        try {
-            final Constructor constructor = orig.getClass().getConstructor();
-            final Collection result = (Collection) constructor.newInstance();
-            result.addAll(orig);
-            return result;
-        } catch (Exception e) {
-            // ignore
-        }
+        if (orig instanceof AbstractCollection) {
+			try {
+				final Constructor constructor = orig.getClass().getConstructor(Collection.class);
+				return (Collection) constructor.newInstance(orig);
+			} catch (Exception e) {
+				// ignore
+			}
+			try {
+				final Constructor constructor = orig.getClass().getConstructor();
+				final Collection result = (Collection) constructor.newInstance();
+				result.addAll(orig);
+				return result;
+			} catch (Exception e) {
+				// ignore
+			}
+		}
         return null;
     }
 
     private static Map createMapFromClass(Map orig) {
-        try {
-            final Constructor constructor = orig.getClass().getConstructor();
-            return (Map) constructor.newInstance();
-        } catch (Exception e) {
-            // ignore
+        if ((orig instanceof AbstractMap) || (orig instanceof Hashtable)) {
+            try {
+                final Constructor constructor = orig.getClass().getConstructor();
+                return (Map) constructor.newInstance();
+            } catch (Exception e) {
+                // ignore
+            }
         }
         return null;
     }
 
     private static Map cloneMapFromClass(Map orig) {
-        try {
-            final Constructor constructor = orig.getClass().getConstructor(Map.class);
-            return (Map) constructor.newInstance(orig);
-        } catch (Exception e) {
-            // ignore
-        }
-        try {
-            final Constructor constructor = orig.getClass().getConstructor();
-            final Map result = (Map) constructor.newInstance();
-            result.putAll(orig);
-            return result;
-        } catch (Exception e) {
-            // ignore
-        }
+        if ((orig instanceof AbstractMap) || (orig instanceof Hashtable)) {
+			try {
+				final Constructor constructor = orig.getClass().getConstructor(Map.class);
+				return (Map) constructor.newInstance(orig);
+			} catch (Exception e) {
+				// ignore
+			}
+			try {
+				final Constructor constructor = orig.getClass().getConstructor();
+				final Map result = (Map) constructor.newInstance();
+				result.putAll(orig);
+				return result;
+			} catch (Exception e) {
+				// ignore
+			}
+		}
         return null;
     }
 
@@ -224,9 +283,6 @@ public class DefaultGroovyMethodsSupport {
         if (orig instanceof TreeMap)
             return new TreeMap(orig);
 
-        if (orig instanceof LinkedHashMap)
-            return new LinkedHashMap(orig);
-
         if (orig instanceof Properties) {
             Map map = new Properties();
             map.putAll(orig);
@@ -236,7 +292,7 @@ public class DefaultGroovyMethodsSupport {
         if (orig instanceof Hashtable)
             return new Hashtable(orig);
 
-        return new HashMap(orig);
+        return new LinkedHashMap(orig);
     }
 
     /**
@@ -247,8 +303,8 @@ public class DefaultGroovyMethodsSupport {
      */
     protected static boolean sameType(Collection[] cols) {
         List all = new LinkedList();
-        for (int i = 0; i < cols.length; i++) {
-            all.addAll(cols[i]);
+        for (Collection col : cols) {
+            all.addAll(col);
         }
         if (all.size() == 0)
             return true;
@@ -260,13 +316,15 @@ public class DefaultGroovyMethodsSupport {
         Class baseClass;
         if (first instanceof Number) {
             baseClass = Number.class;
+        } else if (first == null) {
+            baseClass = NullObject.class;
         } else {
             baseClass = first.getClass();
         }
 
-        for (int i = 0; i < cols.length; i++) {
-            for (Iterator iter = cols[i].iterator(); iter.hasNext();) {
-                if (!baseClass.isInstance(iter.next())) {
+        for (Collection col : cols) {
+            for (Object o : col) {
+                if (!baseClass.isInstance(o)) {
                     return false;
                 }
             }

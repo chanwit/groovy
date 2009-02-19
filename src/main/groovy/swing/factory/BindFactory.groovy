@@ -16,14 +16,9 @@
 package groovy.swing.factory
 
 import groovy.swing.SwingBuilder
-import groovy.swing.binding.AbstractButtonProperties
-import groovy.swing.binding.JScrollBarProperties
-import groovy.swing.binding.JSliderProperties
-import groovy.swing.binding.JTableProperties
-import groovy.swing.binding.JTextComponentProperties
+import groovy.swing.binding.*
 import java.util.Map.Entry
 import org.codehaus.groovy.binding.*
-
 
 /**
  * @author <a href="mailto:shemnon@yahoo.com">Danno Ferrin</a>
@@ -31,6 +26,8 @@ import org.codehaus.groovy.binding.*
  * @since Groovy 1.1
  */
 public class BindFactory extends AbstractFactory {
+
+    public static final String CONTEXT_DATA_KEY = "BindFactoryData";
 
     final Map<String, TriggerBinding> syntheticBindings
 
@@ -56,9 +53,9 @@ public class BindFactory extends AbstractFactory {
         // covers JScrollBar.value
         syntheticBindings.putAll(JScrollBarProperties.getSyntheticProperties())
 
-        // JComboBox.elements
-        // JComboBox.selectedElement
-        //syntheticBindings.putAll(JComboBoxProperties.getSyntheticProperties())
+        // JComboBox.elements / items
+        // JComboBox.selectedElement / selectedItem
+        syntheticBindings.putAll(JComboBoxProperties.getSyntheticProperties())
 
         // JList.elements
         // JList.selectedElement
@@ -99,54 +96,100 @@ public class BindFactory extends AbstractFactory {
     public Object newInstance(FactoryBuilderSupport builder, Object name, Object value, Map attributes) throws InstantiationException, IllegalAccessException {
         Object source = attributes.remove("source")
         Object target = attributes.remove("target")
+        Map bindContext = builder.context.get(CONTEXT_DATA_KEY) ?: [:]
+        if (bindContext.isEmpty()) {
+            builder.context.put(CONTEXT_DATA_KEY, bindContext)
+        }
 
         TargetBinding tb = null
         if (target != null) {
             String targetProperty = (String) attributes.remove("targetProperty") ?: value
             tb = new PropertyBinding(target, targetProperty)
             if (source == null) {
+                // if we have a target but no source assume the build context is the source and return
                 def newAttributes = [:]
                 newAttributes.putAll(attributes)
-                builder.context.put(tb, newAttributes)
+                bindContext.put(tb, newAttributes)
                 attributes.clear()
                 return tb
             }
         }
-        FullBinding fb
 
-        if (attributes.containsKey("sourceEvent") && attributes.containsKey("sourceValue")) {
+        FullBinding fb
+        boolean sea = attributes.containsKey("sourceEvent")
+        boolean sva = attributes.containsKey("sourceValue")
+        boolean spa = attributes.containsKey("sourceProperty") || value
+
+        if (sea && sva && !spa) {
+            // entirely event triggered binding
             Closure queryValue = (Closure) attributes.remove("sourceValue")
-            ClosureSourceBinding psb = new ClosureSourceBinding(queryValue)
+            ClosureSourceBinding csb = new ClosureSourceBinding(queryValue)
             String trigger = (String) attributes.remove("sourceEvent")
             EventTriggerBinding etb = new EventTriggerBinding(source, trigger)
-            fb = etb.createBinding(psb, tb)
-        } else if (attributes.containsKey("sourceProperty") || value) {
-            // first check for synthetic properties
+            fb = etb.createBinding(csb, tb)
+        } else if (spa && !(sea && sva)) {
+            // partially property driven binding
             String property = (String) attributes.remove("sourceProperty") ?: value
-            PropertyBinding psb = new PropertyBinding(source, property)
+            PropertyBinding pb = new PropertyBinding(source, property)
 
-            TriggerBinding trigger = getTriggerBinding(psb)
-            fb = trigger.createBinding(psb, tb)
-        } else {
+            TriggerBinding trigger
+            if (sea) {
+                // source trigger comes from an event
+                String triggerName = (String) attributes.remove("sourceEvent")
+                trigger = new EventTriggerBinding(source, triggerName)
+            } else {
+                // source trigger comes from a property change
+                // this method will also check for synthetic properties
+                trigger = getTriggerBinding(pb)
+            }
+
+            SourceBinding sb;
+            if (sva) {
+                // source value comes from a value closure
+                Closure queryValue = (Closure) attributes.remove("sourceValue")
+                sb = new ClosureSourceBinding(queryValue)
+            } else {
+                // soruce value is the property value
+                sb = pb
+            }
+
+            if (!sea && !sva) {
+                // check for a mutual binding (bi-directional)
+                if (attributes.remove("mutual")) {
+                    fb = new MutualPropertyBinding(sb, tb)
+                } else {
+                    fb = trigger.createBinding(sb, tb)
+                }
+            } else {
+                fb = trigger.createBinding(sb, tb)
+            }
+        } else if (!(sea || sva || spa)) {
+            // if no sourcing is defined then assume we are a closure binding and return
             def newAttributes = [:]
             newAttributes.putAll(attributes)
-            builder.context.put(tb, newAttributes)
+            bindContext.put(tb, newAttributes)
             attributes.clear()
             return new ClosureTriggerBinding(syntheticBindings)
+        } else {
+            throw new RuntimeException("Both sourceEvent: and sourceValue: cannot be specified along with sourceProperty: or a value argument")
         }
 
         if (attributes.containsKey("value")) {
-            builder.context.put(fb, [value:attributes.remove("value")])
+            bindContext.put(fb, [value:attributes.remove("value")])
         }
 
         Object o = attributes.remove("bind")
-        if (    (o == null)
+        if (    ((o == null) && !attributes.containsKey('group'))
             || ((o instanceof Boolean) && ((Boolean)o).booleanValue()))
         {
             fb.bind()
         }
         if (target != null) {
             fb.update()
+        }
+
+        if ((attributes.group instanceof AggregateBinding) && (fb instanceof BindingUpdatable)) {
+            attributes.remove('group').addBinding(fb)
         }
 
         builder.addDisposalClosure(fb.&unbind)
@@ -169,7 +212,7 @@ public class BindFactory extends AbstractFactory {
             node.closure = childContent
             return false;
         } else if (node instanceof TriggerBinding) {
-            def bindAttrs = builder.getContext().get(node) ?: [:]
+            def bindAttrs = builder.context.get(CONTEXT_DATA_KEY)[node] ?: [:]
             if (!bindAttrs.containsKey("converter")) {
                 bindAttrs["converter"] = childContent
                 return false;
@@ -196,12 +239,14 @@ public class BindFactory extends AbstractFactory {
 
     public bindingAttributeDelegate(FactoryBuilderSupport builder, def node, def attributes) {
         Iterator iter = attributes.entrySet().iterator()
+        Map bindContext = builder.context.get(CONTEXT_DATA_KEY) ?: [:]
+
         while (iter.hasNext()) {
             Entry entry = (Entry) iter.next()
             String property = entry.key.toString()
             Object value = entry.value
 
-            def bindAttrs = builder.getContext().get(value) ?: [:]
+            def bindAttrs = bindContext.get(value) ?: [:]
             def idAttr = builder.getAt(SwingBuilder.DELEGATE_PROPERTY_OBJECT_ID) ?: SwingBuilder.DEFAULT_DELEGATE_PROPERTY_OBJECT_ID
             def id = bindAttrs.remove(idAttr)
             if (bindAttrs.containsKey("value")) {
@@ -216,16 +261,15 @@ public class BindFactory extends AbstractFactory {
                 PropertyBinding psb = new PropertyBinding(node, property)
                 fb = getTriggerBinding(psb).createBinding(psb, value)
 
-                Object o = bindAttrs.remove("bind")
+                Object bindValue = bindAttrs.remove("bind")
+                bindAttrs.each{k, v -> fb."$k" = v}
 
-                if (    (o == null)
-                    || ((o instanceof Boolean) && ((Boolean)o).booleanValue()))
+                if (    (bindValue == null)
+                    || ((bindValue instanceof Boolean) && ((Boolean)bindValue).booleanValue()))
                 {
                     fb.bind()
                 }
                 fb.update()
-                
-                bindAttrs.each{k, v -> fb."$k" = v}
 
                 builder.addDisposalClosure(fb.&unbind)
 

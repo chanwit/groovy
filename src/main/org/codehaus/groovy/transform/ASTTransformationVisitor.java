@@ -16,12 +16,13 @@
 
 package org.codehaus.groovy.transform;
 
-import groovy.lang.GroovyClassLoader;
 import org.codehaus.groovy.ast.*;
 import org.codehaus.groovy.classgen.GeneratorContext;
 import org.codehaus.groovy.control.*;
 import org.codehaus.groovy.control.messages.SimpleMessage;
 import org.codehaus.groovy.control.messages.WarningMessage;
+
+import groovy.lang.GroovyClassLoader;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -144,12 +145,13 @@ public class ASTTransformationVisitor extends ClassCodeVisitorSupport {
         }
     }
 
-    public static void addPhaseOperations(CompilationUnit compilationUnit) {
+    public static void addPhaseOperations(final CompilationUnit compilationUnit) {
         addGlobalTransforms(compilationUnit);
 
         compilationUnit.addPhaseOperation(new CompilationUnit.PrimaryClassNodeOperation() {
             public void call(SourceUnit source, GeneratorContext context, ClassNode classNode) throws CompilationFailedException {
-                ASTTransformationCollectorCodeVisitor collector = new ASTTransformationCollectorCodeVisitor(source);
+                ASTTransformationCollectorCodeVisitor collector = 
+                    new ASTTransformationCollectorCodeVisitor(source, compilationUnit.getTransformLoader());
                 collector.visitClass(classNode);
             }
         }, Phases.SEMANTIC_ANALYSIS);
@@ -176,10 +178,10 @@ public class ASTTransformationVisitor extends ClassCodeVisitorSupport {
     }
 
     public static void addGlobalTransforms(CompilationUnit compilationUnit) {
-        GroovyClassLoader cuLoader = compilationUnit.getClassLoader();
+        GroovyClassLoader transformLoader = compilationUnit.getTransformLoader();
         LinkedHashMap<String, URL> globalTransformNames = new LinkedHashMap<String, URL>();
         try {
-            Enumeration<URL> globalServices = cuLoader.getResources("META-INF/services/org.codehaus.groovy.transform.ASTTransformation");
+            Enumeration<URL> globalServices = transformLoader.getResources("META-INF/services/org.codehaus.groovy.transform.ASTTransformation");
             while (globalServices.hasMoreElements()) {
                 URL service = globalServices.nextElement();
                 String className;
@@ -228,15 +230,35 @@ public class ASTTransformationVisitor extends ClassCodeVisitorSupport {
                 "IO Exception attempting to load global transforms:" + e.getMessage(),
                 null));
         }
+        try {
+            Class.forName("java.lang.annotation.Annotation"); // test for 1.5 JVM
+        } catch (Exception e) {
+            // we failed, notify the user
+            StringBuffer sb = new StringBuffer();
+            sb.append("Global ASTTransformations are not enabled in retro builds of groovy.\n");
+            sb.append("The following transformations will be ignored:");
+            for (Map.Entry<String, URL> entry : globalTransformNames.entrySet()) {
+                sb.append('\t');
+                sb.append(entry.getKey());
+                sb.append('\n');
+            }
+            compilationUnit.getErrorCollector().addWarning(new WarningMessage(
+                WarningMessage.POSSIBLE_ERRORS, sb.toString(), null, null));
+            return;
+        }
         for (Map.Entry<String, URL> entry : globalTransformNames.entrySet()) {
             try {
-                Class gTransClass = cuLoader.loadClass(entry.getKey());
-                //noinspection unchecked
+                Class gTransClass = transformLoader.loadClass(entry.getKey(), false, true, false);
+                //no inspection unchecked
                 GroovyASTTransformation transformAnnotation = (GroovyASTTransformation) gTransClass.getAnnotation(GroovyASTTransformation.class);
                 if (transformAnnotation == null) {
-                    compilationUnit.getErrorCollector().addError(new SimpleMessage(
+                    compilationUnit.getErrorCollector().addWarning(new WarningMessage(
+                        WarningMessage.POSSIBLE_ERRORS,
                         "Transform Class " + entry.getKey() + " is specified as a global transform in " + entry.getValue().toExternalForm()
-                        + " but it is not annotated by " + GroovyASTTransformation.class.getName(), null));
+                        + " but it is not annotated by " + GroovyASTTransformation.class.getName()
+                        + " the global tranform associated with it may fail and cause the compilation to fail.", 
+                        null,
+                        null));
                     continue;
                 }
                 if (ASTTransformation.class.isAssignableFrom(gTransClass)) {

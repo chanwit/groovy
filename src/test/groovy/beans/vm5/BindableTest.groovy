@@ -21,7 +21,7 @@ import org.codehaus.groovy.control.CompilationFailedException
 /**
  * @author Danno Ferrin (shemnon)
  */
-class BindableTest extends GroovyTestCase {
+class BindableTest extends GroovySwingTestCase {
 
     public void testSimpleBindableProperty() {
         GroovyShell shell = new GroovyShell()
@@ -60,15 +60,61 @@ class BindableTest extends GroovyTestCase {
         """)
     }
 
-    public void testExisingSetter() {
+    public void testMutatingSetter() {
         GroovyShell shell = new GroovyShell()
-        shouldFail(CompilationFailedException) {
-            shell.evaluate("""
-                class BindableTestBean3 {
-                    @groovy.beans.Bindable String name
-                    void setName() { }
+        shell.evaluate("""
+            class BindableTestBean3 {
+                @groovy.beans.Bindable String name
+                void setName(String newName) {
+                     this.@name = "x\$newName"
                 }
-            """)
+            }
+            sb = new BindableTestBean3(name:"foo")
+            changed = 0
+            sb.propertyChange = {evt ->
+                assert evt.newValue =~ '^x'
+                changed++
+            }
+            sb.name = "baz"
+            assert changed == 1
+        """)
+    }
+
+    public void testWithSettersAndGetters() {
+        for (int i = 0; i < 16; i++) {
+            boolean bindClass = i & 1
+            boolean field = i & 2
+            boolean setter = i & 4
+            boolean getter = i & 8
+            int expectedCount = (bindClass && !field)?2:1
+            String script = """
+                    import groovy.beans.Bindable
+
+                    ${bindClass?'@Bindable ':''}class BindableTestSettersAndGetters$i {
+
+                        @Bindable String alwaysBound
+                        ${field?'protected ':''} String name
+
+                        ${setter?'':'//'}void setName(String newName) { this.@name = "x\$newName" }
+                        ${getter?'':'//'}String getName() { return this.@name }
+                    }
+                    sb = new BindableTestSettersAndGetters$i(name:"foo", alwaysBound:"bar")
+                    changed = 0
+                    sb.propertyChange = {evt ->
+                        changed++
+                    }
+                    sb.alwaysBound = "baz"
+                    sb.name = "bif"
+                    sb.name = "bif"
+                    assert changed == $expectedCount
+                """
+            try {
+                GroovyShell shell = new GroovyShell()
+                shell.evaluate(script);
+            } catch (Throwable t) {
+                System.out.println("Failed Script: $script")
+                throw t
+            }
         }
     }
 
@@ -78,66 +124,138 @@ class BindableTest extends GroovyTestCase {
             shell.evaluate("""
                 class BindableTestBean4 {
                     public @groovy.beans.Bindable String name
-                    void setName() { }
                 }
             """)
         }
     }
 
-    public void testOnClass() {
+    public void testOnStaticField() {
+        GroovyShell shell = new GroovyShell()
+        shouldFail(CompilationFailedException) {
+            shell.evaluate("""
+                class BindableTestBean5 {
+                     @groovy.beans.Bindable static String name
+                }
+            """)
+        }
+    }
+
+    public void testClassMarkers() {
+        for (int i = 0; i < 7; i++) {
+            boolean bindField  = i & 1
+            boolean bindClass  = i & 2
+            boolean staticField  = i & 4
+            int bindCount = bindClass?(staticField?2:3):(bindField?1:0);
+
+            String script = """
+                    import groovy.beans.Bindable
+
+                    ${bindClass?'@Bindable ':''}class ClassMarkerBindable$i {
+                        String neither
+
+                        ${bindField?'@Bindable ':''}String bind
+
+                        ${staticField?'static ':''}String staticString
+                    }
+
+                    cb = new ClassMarkerBindable$i(neither:'a', bind:'b', staticString:'c')
+                    bindCount = 0
+                    ${bindClass|bindField?'cb.propertyChange = { bindCount++ }':''}
+                    cb.neither = 'd'
+                    cb.bind = 'e'
+                    cb.staticString = 'f'
+                    assert bindCount == $bindCount
+                """
+            try {
+                GroovyShell shell = new GroovyShell()
+                shell.evaluate(script);
+            } catch (Throwable t) {
+                System.out.println("Failed Script: $script")
+                throw t
+            }
+        }
+    }
+
+    public void testExtendsComponent() {
+        testInEDT {
+            GroovyShell shell = new GroovyShell()
+            shell.evaluate("""
+                import groovy.beans.Bindable
+
+                class BindableTestBean6 extends javax.swing.JPanel {
+                    @Bindable String testField
+                }
+
+                sb = new BindableTestBean6()
+                sb.testField = "bar"
+                changed = false
+                sb.propertyChange = {changed = true}
+                sb.testField = "foo"
+                assert changed
+            """)
+        }
+    }
+
+    public void testPrimitaveTypes() {
         GroovyShell shell = new GroovyShell()
         shell.evaluate("""
             import groovy.beans.Bindable
 
-            @Bindable
-            class BindableTestBean5 {
-                String name
-                String value
-            }
-
-            sb = new BindableTestBean5(name:"foo", value:"bar")
-            changed = 0
-            sb.propertyChange = {changed++}
-            sb.name = "baz"
-            sb.value = "biff"
-            assert changed == 2
-        """)
-
-        shell = new GroovyShell()
-        shell.evaluate("""
-            import groovy.beans.Bindable
-
-            @Bindable
-            class BindableTestBean6 {
-                String name
-                @Bindable String value
-            }
-
-            sb = new BindableTestBean6(name:"foo", value:"bar")
-            changed = 0
-            sb.propertyChange = {changed++}
-            sb.name = "baz"
-            sb.value = "biff"
-            assert changed == 2
-        """)
-
-        shell = new GroovyShell()
-        shell.evaluate("""
-            import groovy.beans.Bindable
-
-            @Bindable
             class BindableTestBean7 {
-                @Bindable String name
-                @Bindable String value
+                @Bindable String testField
+                @Bindable boolean testBoolean
+                @Bindable byte testByte
+                @Bindable short testShort
+                @Bindable int testInt
+                @Bindable long testLong
+                @Bindable float testFloat
+                @Bindable double testDouble
             }
 
-            sb = new BindableTestBean7(name:"foo", value:"bar")
-            changed = 0
+            sb = new BindableTestBean7()
+            sb.testField = "bar"
+            int changed = 0
             sb.propertyChange = {changed++}
-            sb.name = "baz"
-            sb.value = "biff"
-            assert changed == 2
+            sb.testField = "foo"
+            sb.testBoolean = true
+            sb.testByte = 1
+            sb.testShort = 1
+            sb.testInt = 1
+            sb.testLong = 1
+            sb.testFloat = 1
+            sb.testDouble = 1
+            assert changed == 8
         """)
+    }
 
+    public void testBadInheritance() {
+        shouldFail(CompilationFailedException) {
+            GroovyShell shell = new GroovyShell()
+            shell.evaluate("""
+                import groovy.beans.Bindable
+
+                class BindableTestBean8  {
+                    @Bindable String testField
+                    void addPropertyChangeListener(java.beans.PropertyChangeListener l) {}
+                }
+                new BindableTestBean8()
+            """)
+        }
+        shouldFail(CompilationFailedException) {
+            GroovyShell shell = new GroovyShell()
+            shell.evaluate("""
+                import groovy.beans.Bindable
+
+                class BindableTestBean9  {
+                    void addPropertyChangeListener(java.beans.PropertyChangeListener l) {}
+                }
+
+                class BindableTestBean10 extends BindableTestBean9 {
+                    @Bindable String testField
+                }
+
+                new BindableTestBean10()
+            """)
+        }
     }
 }

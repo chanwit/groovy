@@ -31,7 +31,7 @@ import org.codehaus.groovy.runtime.MethodClosure
  * @author <a href="mailto:james@coredevelopers.net">James Strachan</a>
  * @version $Revision$
  */
-public class SwingBuilder  extends FactoryBuilderSupport {
+public class SwingBuilder extends FactoryBuilderSupport {
 
     // local fields
     private static final Logger LOG = Logger.getLogger(SwingBuilder.name)
@@ -65,6 +65,7 @@ public class SwingBuilder  extends FactoryBuilderSupport {
         registerFactory("bind", bindFactory)
         addAttributeDelegate(bindFactory.&bindingAttributeDelegate)
         registerFactory("bindProxy", new BindProxyFactory())
+        registerFactory ("bindGroup", new BindGroupFactory());
     }
 
     def registerPassThruNodes() {
@@ -206,7 +207,7 @@ public class SwingBuilder  extends FactoryBuilderSupport {
         RendererFactory renderFactory = new RendererFactory()
         registerFactory("tableCellRenderer", renderFactory)
         registerFactory("listCellRenderer", renderFactory)
-        registerFactory("onRender", new RendererUpdateFactory())        
+        registerFactory("onRender", new RendererUpdateFactory())
     }
 
     def registerThreading() {
@@ -251,22 +252,29 @@ public class SwingBuilder  extends FactoryBuilderSupport {
         if (headless || SwingUtilities.isEventDispatchThread()) {
             c.call(this)
         } else {
+            Map<String, Object> continuationData = getContinuationData();
             try {
                 if (!(c instanceof MethodClosure)) {
                     c = c.curry([this])
                 }
-                SwingUtilities.invokeAndWait(c)
+                SwingUtilities.invokeAndWait {
+                    restoreFromContinuationData(continuationData)
+                    c()
+                    continuationData = getContinuationData()
+                }
             } catch (InterruptedException e) {
                 throw new GroovyRuntimeException("interrupted swing interaction", e)
             } catch (InvocationTargetException e) {
                 throw new GroovyRuntimeException("exception in event dispatch thread", e.getTargetException())
+            } finally {
+                restoreFromContinuationData(continuationData);
             }
         }
         return this
     }
 
     /**
-     * Utilitiy method to run a closure in EDT,
+     * Utility method to run a closure in EDT,
      * using <code>SwingUtilities.invokeLater</cod>.
      *
      * @param c this closure is run in the EDT
@@ -302,14 +310,37 @@ public class SwingBuilder  extends FactoryBuilderSupport {
     }
 
     /**
-     * Utility method to create a SwingBuilder, and run the
-     * the closure in the EDT
+     * Factory method to create a SwingBuilder, and run the
+     * the closure in it on the EDT
      *
-     * @param c run this closre in the builder using the edt method
+     * @param c run this closure in the new builder using the edt method
      */
-    public static SwingBuilder build(Closure c) {
+    public static SwingBuilder edtBuilder(Closure c) {
         SwingBuilder builder = new SwingBuilder()
         return builder.edt(c)
+    }
+
+    /**
+     * Old factory method static SwingBuilder.build(Closure).
+     * @param c run this closure in the builder using the edt method
+     */
+    @Deprecated
+    public static SwingBuilder '$static_methodMissing'(String method, Object args) {
+        if (method == 'build' && args.length == 1 && args[0] instanceof Closure) {
+            return edtBuilder(args[0])
+        } else {
+            throw new MissingMethodException(method, SwingBuilder, args, true)
+        }
+    }
+
+    /**
+     * Compatibility API.
+     *
+     * @param c run this closure in the builder
+     */
+    public Object build(Closure c) {
+        c.setDelegate(this)
+        return c.call()
     }
 
     public KeyStroke shortcut(key, modifier = 0) {
@@ -324,16 +355,16 @@ public class SwingBuilder  extends FactoryBuilderSupport {
             return KeyStroke.getKeyStroke(ks.getKeyCode(), ks.getModifiers() | modifier | Toolkit.getDefaultToolkit().getMenuShortcutKeyMask())        }
     }
 
-    public static LookAndFeel lookAndFeel(Object lookAndFeel, Closure initCode) {
-        lookAndFeel([:], lookAndFeel, initCode)
+    public static LookAndFeel lookAndFeel(Object laf, Closure initCode) {
+        lookAndFeel([:], laf, initCode)
     }
 
-    public static LookAndFeel lookAndFeel(Map attributes = [:], Object lookAndFeel = null, Closure initCode = null) {
+    public static LookAndFeel lookAndFeel(Map attributes = [:], Object laf = null, Closure initCode = null) {
         // if we get rid of this warning, we can make it static.
         //if (context) {
         //    LOG.warning "For best result do not call lookAndFeel when it is a child of a SwingBuidler node, initializaiton of the Look and Feel may be inconsistant."
         //}
-        LookAndFeelHelper.instance.lookAndFeel(lookAndFeel, attributes, initCode)
+        LookAndFeelHelper.instance.lookAndFeel(laf, attributes, initCode)
     }
 
     public static LookAndFeel lookAndFeel(Object... lafs) {
@@ -357,7 +388,7 @@ public class SwingBuilder  extends FactoryBuilderSupport {
         return null
     }
 
-    private static LookAndFeel _laf(List s) {
+    private static LookAndFeel _laf(java.util.List s) {
         _laf(*s)
     }
 
@@ -383,24 +414,5 @@ public class SwingBuilder  extends FactoryBuilderSupport {
         if (theID) {
             builder.setVariable(theID, node)
         }
-    }
-
-    ///////////////////////////////////////////////////////////////////////////
-    // these appear to be Groovy 1.6beta2 bugs?  It breaks without it!
-    ///////////////////////////////////////////////////////////////////////////
-    public Object invokeMethod(String methodName) {
-        return super.invokeMethod(methodName)
-    }
-
-    public Object invokeMethod(String methodName, Object args) {
-        return super.invokeMethod(methodName, args)
-    }
-
-    public Object getProperty(String property) {
-        return super.getProperty(property)
-    }
-
-    public void setProperty(String property, Object newValue) {
-        super.setProperty(property, newValue)
     }
 }

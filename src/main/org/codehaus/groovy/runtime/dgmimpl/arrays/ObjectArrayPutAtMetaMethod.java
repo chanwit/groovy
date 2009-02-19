@@ -15,12 +15,14 @@
  */
 package org.codehaus.groovy.runtime.dgmimpl.arrays;
 
+import groovy.lang.GString;
 import groovy.lang.MetaClassImpl;
 import groovy.lang.MetaMethod;
 import org.codehaus.groovy.reflection.CachedClass;
 import org.codehaus.groovy.reflection.ReflectionCache;
 import org.codehaus.groovy.runtime.callsite.CallSite;
 import org.codehaus.groovy.runtime.callsite.PojoMetaMethodSite;
+import org.codehaus.groovy.runtime.typehandling.DefaultTypeTransformation;
 
 public class ObjectArrayPutAtMetaMethod extends ArrayPutAtMetaMethod {
     private static final CachedClass OBJECT_CLASS = ReflectionCache.getCachedClass(Object.class);
@@ -37,7 +39,26 @@ public class ObjectArrayPutAtMetaMethod extends ArrayPutAtMetaMethod {
 
     public Object invoke(Object object, Object[] arguments) {
         final Object[] objects = (Object[]) object;
-        objects[normaliseIndex(((Integer) arguments[0]).intValue(), objects.length)] = arguments[1];
+        Object newValue = arguments[1];
+    	Class arrayComponentClass = objects.getClass().getComponentType();
+    	final int index = normaliseIndex(((Integer) arguments[0]).intValue(), objects.length);
+        if (newValue instanceof Number) {
+        	if (!arrayComponentClass.equals(newValue.getClass())) {
+        		Object newVal = DefaultTypeTransformation.castToType(newValue, arrayComponentClass);
+        		objects[index] = newVal;
+        		return null;
+        	}
+        } else if (Character.class.isAssignableFrom(arrayComponentClass)) {
+        	objects[index] = DefaultTypeTransformation.getCharFromSizeOneString(newValue);
+            return null;
+        } else if (Number.class.isAssignableFrom(arrayComponentClass)) {
+        	if(newValue instanceof Character || newValue instanceof String || newValue instanceof GString) {
+        		Character ch = DefaultTypeTransformation.getCharFromSizeOneString(newValue);
+        		objects[index] = DefaultTypeTransformation.castToType(ch, arrayComponentClass);
+        		return null;
+        	}
+        }
+        objects[index] = arguments[1];
         return null;
     }
 

@@ -35,6 +35,9 @@ import java.util.Map;
  * @author Jochen Theodorou
  */
 public class VariableScopeVisitor extends ClassCodeVisitorSupport {
+    
+    private static final Expression CALL = new ConstantExpression("call");
+    
     private VariableScope currentScope = null;
     private VariableScope headScope = new VariableScope();
     private ClassNode currentClass = null;
@@ -100,8 +103,10 @@ public class VariableScopeVisitor extends ClassCodeVisitorSupport {
         }
     }
 
-    private void declare(VariableExpression expr) {
-        declare(expr, expr);
+    private void declare(VariableExpression vex) {
+        vex.setInStaticContext(currentScope.isInStaticContext());
+        declare(vex, vex);
+        vex.setAccessedVariable(vex);
     }
 
     private void declare(Variable var, ASTNode expr) {
@@ -192,9 +197,7 @@ public class VariableScopeVisitor extends ClassCodeVisitorSupport {
         if (!(name.startsWith("set") || name.startsWith("get"))) return null;
         String pname = name.substring(3);
         if (pname.length() == 0) return null;
-        String s = pname.substring(0, 1).toLowerCase();
-        String rest = pname.substring(1);
-        pname = s + rest;
+        pname = java.beans.Introspector.decapitalize(pname);
 
         if (name.startsWith("get") && m.getReturnType() == ClassHelper.VOID_TYPE) {
             return null;
@@ -362,11 +365,17 @@ public class VariableScopeVisitor extends ClassCodeVisitorSupport {
         // visit right side first to avoid the usage of a 
         // variable before its declaration
         expression.getRightExpression().visit(this);
+        
         // no need to visit left side, just get the variable name
-        VariableExpression vex = expression.getVariableExpression();
-        vex.setInStaticContext(currentScope.isInStaticContext());
-        declare(vex);
-        vex.setAccessedVariable(vex);
+        if (expression.isMultipleAssignmentDeclaration()) {
+            ArgumentListExpression list = (ArgumentListExpression) expression.getLeftExpression();
+            for (Iterator it=list.getExpressions().iterator(); it.hasNext();) {
+                VariableExpression exp = (VariableExpression) it.next();
+                declare(exp);
+            }
+        } else {
+            declare(expression.getVariableExpression());           
+        }        
     }
 
     public void visitVariableExpression(VariableExpression expression) {
@@ -407,7 +416,8 @@ public class VariableScopeVisitor extends ClassCodeVisitorSupport {
                 declare(parameters[i], expression);                
             }
         } else if (expression.getParameters() != null) {
-            DynamicVariable var = new DynamicVariable("it", currentScope.isInStaticContext());
+            Parameter var = new Parameter(ClassHelper.OBJECT_TYPE,"it");
+            var.setInStaticContext(currentScope.isInStaticContext());
             currentScope.putDeclaredVariable(var);
         }
 
@@ -467,15 +477,26 @@ public class VariableScopeVisitor extends ClassCodeVisitorSupport {
 
     public void visitMethodCallExpression(MethodCallExpression call) {
         if (call.isImplicitThis() && call.getMethod() instanceof ConstantExpression) {
-            Object value = ((ConstantExpression) call.getMethod()).getText();
+            ConstantExpression methodNameConstant = (ConstantExpression) call.getMethod();
+            Object value = methodNameConstant.getText();
+            
             if (!(value instanceof String)) {
                 throw new GroovyBugError("tried to make a method call with a non-String constant method name.");
             }
+            
             String methodName = (String) value;
             Variable v = checkVariableNameForDeclaration(methodName, call);
             if (v != null && !(v instanceof DynamicVariable)) {
                 checkVariableContextAccess(v, call);
             }
+
+            if (v instanceof VariableExpression || v instanceof Parameter) {
+                VariableExpression object = new VariableExpression(v);
+                object.setSourcePosition(methodNameConstant);
+                call.setObjectExpression(object);
+                call.setMethod(CALL);
+            }
+
         }
         super.visitMethodCallExpression(call);
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2007 the original author or authors.
+ * Copyright 2003-2008 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,19 +20,33 @@ import groovy.swing.SwingBuilder
 import groovy.ui.ConsoleTextEditor
 import groovy.ui.SystemOutputInterceptor
 import groovy.ui.text.FindReplaceUtility
+
 import java.awt.Component
 import java.awt.EventQueue
 import java.awt.Font
 import java.awt.Toolkit
+import java.awt.Window
 import java.awt.event.ActionEvent
 import java.util.prefs.Preferences
 import javax.swing.*
 import javax.swing.event.CaretEvent
 import javax.swing.event.CaretListener
+import javax.swing.event.HyperlinkListener
+import javax.swing.event.HyperlinkEvent
+import javax.swing.text.AttributeSet
 import javax.swing.text.Element
+import javax.swing.text.SimpleAttributeSet
 import javax.swing.text.Style
+import javax.swing.text.StyleConstants
+import javax.swing.text.html.HTML
+
 import org.codehaus.groovy.runtime.InvokerHelper
 import org.codehaus.groovy.runtime.StackTraceUtils
+import org.codehaus.groovy.control.ErrorCollector
+import org.codehaus.groovy.control.MultipleCompilationErrorsException
+import org.codehaus.groovy.control.messages.SyntaxErrorMessage
+import org.codehaus.groovy.syntax.SyntaxException
+import org.codehaus.groovy.control.messages.ExceptionMessage
 
 /**
  * Groovy Swing console.
@@ -43,8 +57,11 @@ import org.codehaus.groovy.runtime.StackTraceUtils
  * @author Danno Ferrin
  * @author Dierk Koenig, changed Layout, included Selection sensitivity, included ObjectBrowser
  * @author Alan Green more features: history, System.out capture, bind result to _
+ * @author Guillaume Laforge, stacktrace hyperlinking to the current script line
  */
-class Console implements CaretListener {
+class Console implements CaretListener, HyperlinkListener {
+
+    static final String DEFAULT_SCRIPT_NAME_START = "ConsoleScript"
 
     static private prefs = Preferences.userNodeForPackage(Console)
 
@@ -55,6 +72,12 @@ class Console implements CaretListener {
     boolean fullStackTraces = prefs.getBoolean('fullStackTraces',
         Boolean.valueOf(System.getProperty("groovy.full.stacktrace", "false")))
     Action fullStackTracesAction
+
+    boolean showScriptInOutput = prefs.getBoolean('showScriptInOutput', true)
+    Action showScriptInOutputAction
+
+    boolean visualizeScriptResults = prefs.getBoolean('visualizeScriptResults', false)
+    Action visualizeScriptResultsAction
 
     boolean showToolbar = prefs.getBoolean('showToolbar', true)
     Component toolbar
@@ -86,6 +109,8 @@ class Console implements CaretListener {
     Style promptStyle
     Style commandStyle
     Style outputStyle
+    Style stacktraceStyle
+    Style hyperlinkStyle
     Style resultStyle
 
     // Internal history
@@ -148,6 +173,8 @@ class Console implements CaretListener {
             fullStackTracesAction.enabled = false;
         }
         consoleControllers += this
+
+        binding.variables._outputTransforms = OutputTransforms.loadOutputTransforms()
     }
 
     void newScript(ClassLoader parent, Binding binding) {
@@ -245,15 +272,80 @@ class Console implements CaretListener {
         updateHistoryActions()
     }
 
-    // Append a string to the output area
-    void appendOutput(text, style){
-        def doc = outputArea.styledDocument
-        doc.insertString(doc.length, text, style)
-
-        // Ensure we don't have too much in console (takes too much memory)
+    // Ensure we don't have too much in console (takes too much memory)
+    private ensureNoDocLengthOverflow(doc) {
         if (doc.length > maxOutputChars) {
             doc.remove(0, doc.length - maxOutputChars)
         }
+    }
+
+    // Append a string to the output area
+    void appendOutput(String text, AttributeSet style){
+        def doc = outputArea.styledDocument
+        doc.insertString(doc.length, text, style)
+        ensureNoDocLengthOverflow(doc)
+    }
+
+    void appendOutput(Window window, AttributeSet style) {
+        append(window.toString(), style)
+    }
+
+    void appendOutput(Object object, AttributeSet style) {
+        append(object.toString(), style)
+    }
+
+    void appendOutput(Component component, AttributeSet style) {
+        SimpleAttributeSet sas = new SimpleAttributeSet();
+        sas.addAttribute(StyleConstants.NameAttribute, "component")
+        StyleConstants.setComponent(sas, component)
+        appendOutput(component.toString(), sas)
+    }
+
+    void appendOutput(Icon icon, AttributeSet style) {
+        SimpleAttributeSet sas = new SimpleAttributeSet();
+        sas.addAttribute(StyleConstants.NameAttribute, "icon")
+        StyleConstants.setIcon(sas, icon)
+        appendOutput(icon.toString(), sas)
+    }
+
+    void appendStacktrace(text) {
+        def doc = outputArea.styledDocument
+
+        // split lines by new line separator
+        def lines = text.split(/(\n|\r|\r\n|\u0085|\u2028|\u2029)/)
+
+        // Java Identifier regex
+        def ji = /([\p{Alnum}_\$][\p{Alnum}_\$]*)/
+
+        // stacktrace line regex
+        def stacktracePattern = /\tat $ji(\.$ji)+\((($ji(\.(java|groovy))?):(\d+))\)/
+
+        lines.each { line ->
+            int initialLength = doc.length
+
+            def matcher = line =~ stacktracePattern
+            def fileName =  matcher.matches() ? matcher[0][-5] : ""
+
+            if (fileName == scriptFile?.name || fileName.startsWith(DEFAULT_SCRIPT_NAME_START)) {
+                def fileNameAndLineNumber = matcher[0][-6]
+                def length = fileNameAndLineNumber.length()
+                def index = line.indexOf(fileNameAndLineNumber)
+
+                def style = hyperlinkStyle
+                def hrefAttr = new SimpleAttributeSet()
+                // don't pass a GString as it won't be coerced to String as addAttribute takes an Object
+                hrefAttr.addAttribute(HTML.Attribute.HREF, "file://" + fileNameAndLineNumber)
+                style.addAttribute(HTML.Tag.A, hrefAttr);
+
+                doc.insertString(initialLength,                     line[0..<index],                    stacktraceStyle)
+                doc.insertString(initialLength + index,             line[index..<(index + length)],     style)
+                doc.insertString(initialLength + index + length,    line[(index + length)..-1] + '\n',  stacktraceStyle)
+            } else {
+                doc.insertString(initialLength, line + '\n', stacktraceStyle)
+            }
+        }
+
+        ensureNoDocLengthOverflow(doc)
     }
 
     // Append a string to the output area on a new line
@@ -305,6 +397,16 @@ class Console implements CaretListener {
         System.setProperty("groovy.full.stacktrace",
             Boolean.toString(fullStackTraces))
         prefs.putBoolean('fullStackTraces', fullStackTraces)
+    }
+
+    void showScriptInOutput(EventObject evt) {
+        showScriptInOutput = evt.source.selected
+        prefs.putBoolean('showScriptInOutput', showScriptInOutput)
+    }
+
+    void visualizeScriptResults(EventObject evt) {
+        visualizeScriptResults = evt.source.selected
+        prefs.putBoolean('visualizeScriptResults', visualizeScriptResults)
     }
 
     void showToolbar(EventObject evt) {
@@ -427,14 +529,49 @@ class Console implements CaretListener {
         statusLabel.text = 'Execution terminated with exception.'
         history[-1].exception = t
 
-        appendOutputNl("Exception thrown: ", promptStyle)
-        appendOutput(t.toString(), resultStyle)
+        if (t instanceof MultipleCompilationErrorsException) {
+            MultipleCompilationErrorsException mcee = t
+            ErrorCollector collector = mcee.errorCollector
+            int count = collector.errorCount
+            appendOutputNl("${count} compilation error${count > 1 ? 's' : ''}:\n\n", commandStyle)
+
+            collector.errors.each { error ->
+                if (error instanceof SyntaxErrorMessage) {
+                    SyntaxException se = error.cause
+                    int errorLine = se.line
+                    String message = se.originalMessage
+
+                    String scriptFileName = scriptFile?.name ?: DEFAULT_SCRIPT_NAME_START 
+
+                    def doc = outputArea.styledDocument
+
+                    def style = hyperlinkStyle
+                    def hrefAttr = new SimpleAttributeSet()
+                    // don't pass a GString as it won't be coerced to String as addAttribute takes an Object
+                    hrefAttr.addAttribute(HTML.Attribute.HREF, "file://" + scriptFileName + ":" + errorLine)
+                    style.addAttribute(HTML.Tag.A, hrefAttr);
+
+                    doc.insertString(doc.length, message + " at ", stacktraceStyle)
+                    doc.insertString(doc.length, "line: ${se.line}, column: ${se.column}\n\n", style)
+                } else if (error instanceof Throwable) {
+                    reportException(error)
+                } else if (error instanceof ExceptionMessage) {
+                    reportException(error.cause) 
+                }
+            }
+        } else {
+            reportException(t)
+        }
+        bindResults()
+    }
+
+    private reportException(Throwable t) {
+        appendOutputNl("Exception thrown: ", commandStyle)
+        appendOutput(t.message + '\n', stacktraceStyle)
 
         StringWriter sw = new StringWriter()
-        new PrintWriter(sw).withWriter { pw -> StackTraceUtils.deepSanitize(t).printStackTrace(pw) }
-
-        appendOutputNl("\n${sw.buffer}\n", outputStyle)
-        bindResults()
+        new PrintWriter(sw).withWriter {pw -> StackTraceUtils.deepSanitize(t).printStackTrace(pw) }
+        appendStacktrace("\n${sw.buffer}\n")
     }
 
     def finishNormal(Object result) {
@@ -443,7 +580,12 @@ class Console implements CaretListener {
         if (result != null) {
             statusLabel.text = 'Execution complete.'
             appendOutputNl("Result: ", promptStyle)
-            appendOutput("${InvokerHelper.inspect(result)}", resultStyle)
+            def obj = (visualizeScriptResults
+                ? OutputTransforms.transformResult(result, shell.context._outputTransforms)
+                : result.toString())
+
+            // multi-methods are magical!
+            appendOutput(obj, resultStyle)
         } else {
             statusLabel.text = 'Execution complete. Result was null.'
         }
@@ -463,12 +605,6 @@ class Console implements CaretListener {
             }
         }
         return null
-    }
-
-    // Allow access to shell from outside console
-    // (useful for configuring shell before startup)
-    GroovyShell getShell() {
-        return shell
     }
 
     void historyNext(EventObject evt = null) {
@@ -572,9 +708,11 @@ class Console implements CaretListener {
         pendingRecord = new HistoryRecord(allText:'', selectionStart:0, selectionEnd:0)
 
         // Print the input text
-        for (line in record.getTextToRun(selected).tokenize("\n")) {
-            appendOutputNl('groovy> ', promptStyle)
-            appendOutput(line, commandStyle)
+        if (showScriptInOutput) {
+            for (line in record.getTextToRun(selected).tokenize("\n")) {
+                appendOutputNl('groovy> ', promptStyle)
+                appendOutput(line, commandStyle)
+            }
         }
 
         //appendOutputNl("") - with wrong number of args, causes StackOverFlowError
@@ -587,7 +725,7 @@ class Console implements CaretListener {
         runThread = Thread.start {
             try {
                 SwingUtilities.invokeLater { showRunWaitDialog() }
-                String name = "Script${scriptNameCounter++}"
+                String name = scriptFile?.name ?: (DEFAULT_SCRIPT_NAME_START + scriptNameCounter++)
                 if(beforeExecution) {
                     beforeExecution()
                 }
@@ -773,4 +911,37 @@ class Console implements CaretListener {
         inputEditor.redoAction.actionPerformed(evt)
     }
 
+    void hyperlinkUpdate(HyperlinkEvent e) {
+        if (e.eventType == HyperlinkEvent.EventType.ACTIVATED) {
+            // URL of the form: file://myscript.groovy:32
+            String url = e.getURL()
+            int lineNumber = url[(url.lastIndexOf(':') + 1)..-1].toInteger()
+
+            def editor = inputEditor.textEditor
+            def text = editor.text
+
+            int newlineBefore = 0
+            int newlineAfter = 0
+            int currentLineNumber = 1
+
+            // let's find the previous and next newline surrounding the offending line
+            int i = 0
+            for (ch in text) {
+                if (ch == '\n') {
+                    currentLineNumber++
+                }
+                if (currentLineNumber == lineNumber) {
+                    newlineBefore = i
+                    def nextNewline = text.indexOf('\n', i + 1)
+                    newlineAfter = nextNewline > -1 ? nextNewline : text.length()
+                    break
+                }
+                i++
+            }
+
+            // highlight / select the whole line
+            editor.setCaretPosition(newlineBefore)
+            editor.moveCaretPosition(newlineAfter)
+        }
+    }
 }

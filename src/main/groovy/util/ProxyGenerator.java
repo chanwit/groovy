@@ -17,6 +17,7 @@ package groovy.util;
 
 import groovy.lang.*;
 import org.codehaus.groovy.control.MultipleCompilationErrorsException;
+import org.codehaus.groovy.runtime.ConversionHandler;
 import org.codehaus.groovy.runtime.DefaultGroovyMethods;
 import org.codehaus.groovy.runtime.InvokerHelper;
 
@@ -41,6 +42,9 @@ public class ProxyGenerator {
 
     private ClassLoader override = null;
     private boolean debug = false;
+    private boolean emptyMethods = false;
+    private List objectMethods = getInheritedMethods(Object.class, new ArrayList());
+    private List groovyObjectMethods = getInheritedMethods(GroovyObject.class, new ArrayList());
 
     public boolean getDebug() {
         return debug;
@@ -48,6 +52,14 @@ public class ProxyGenerator {
 
     public void setDebug(boolean debug) {
         this.debug = debug;
+    }
+
+    public boolean getEmptyMethods() {
+        return emptyMethods;
+    }
+
+    public void setEmptyMethods(boolean emptyMethods) {
+        this.emptyMethods = emptyMethods;
     }
 
     public ClassLoader getOverride() {
@@ -59,11 +71,17 @@ public class ProxyGenerator {
     }
 
     public Object instantiateAggregateFromBaseClass(Class clazz) {
-        return instantiateAggregateFromBaseClass(null, clazz);
+        return instantiateAggregateFromBaseClass((Map)null, clazz);
     }
 
     public Object instantiateAggregateFromBaseClass(Map map, Class clazz) {
         return instantiateAggregateFromBaseClass(map, clazz, null);
+    }
+
+    public Object instantiateAggregateFromBaseClass(Closure cl, Class clazz) {
+        Map m = new HashMap();
+        m.put("*", cl);
+        return instantiateAggregateFromBaseClass(m, clazz, null);
     }
 
     public Object instantiateAggregateFromBaseClass(Map map, Class clazz, Object[] constructorArgs) {
@@ -140,20 +158,23 @@ public class ProxyGenerator {
         buffer.append("    }\n");
 
         // add overwriting methods
-        List selectedMethods = new ArrayList();
-        List publicAndProtectedMethods = getInheritedMethods(baseClass, new ArrayList());
-        for (int i = 0; i < publicAndProtectedMethods.size(); i++) {
-            Method method = (Method) publicAndProtectedMethods.get(i);
-            if (method.getName().indexOf('$') != -1)
+        Map<String, Method> selectedMethods = new HashMap<String, Method>();
+        List<Method> publicAndProtectedMethods = getInheritedMethods(baseClass, new ArrayList<Method>());
+        boolean closureIndicator = map.containsKey("*");
+        for (Method method : publicAndProtectedMethods) {
+            if (method.getName().indexOf('$') != -1
+                    || Modifier.isFinal(method.getModifiers())
+                    || ConversionHandler.isCoreObjectMethod(method)
+                    || containsEquivalentMethod(selectedMethods.values(), method))
                 continue;
-            if (map.containsKey(method.getName())) {
-                selectedMethods.add(method.getName());
-                addOverridingMapCall(buffer, method);
+            if (map.containsKey(method.getName()) || closureIndicator) {
+                selectedMethods.put(method.getName(), method);
+                addOverridingMapCall(buffer, method, closureIndicator);
             }
         }
 
         // add interface methods
-        ArrayList interfaceMethods = new ArrayList();
+        List interfaceMethods = new ArrayList();
         for (int i = 0; i < interfacesToImplement.size(); i++) {
             Class thisInterface = (Class) interfacesToImplement.get(i);
             getInheritedMethods(thisInterface, interfaceMethods);
@@ -161,7 +182,7 @@ public class ProxyGenerator {
         for (int i = 0; i < interfaceMethods.size(); i++) {
             Method method = (Method) interfaceMethods.get(i);
             if (!containsEquivalentMethod(publicAndProtectedMethods, method)) {
-                selectedMethods.add(method.getName());
+                selectedMethods.put(method.getName(), method);
                 addMapOrDummyCall(map, buffer, method);
             }
         }
@@ -169,9 +190,9 @@ public class ProxyGenerator {
         // add leftover methods from the map
         for (Iterator iterator = map.keySet().iterator(); iterator.hasNext();) {
             String methodName = (String) iterator.next();
-            if (methodName.indexOf('$') != -1)
+            if (methodName.indexOf('$') != -1 || methodName.indexOf('*') != -1)
                 continue;
-            if (selectedMethods.contains(methodName)) continue;
+            if (selectedMethods.keySet().contains(methodName)) continue;
             addNewMapCall(buffer, methodName);
         }
 
@@ -258,12 +279,8 @@ public class ProxyGenerator {
         buffer.append("        this.delegate = delegate\n");
         buffer.append("    }\n");
 
-        List objectMethods = getInheritedMethods(Object.class, new ArrayList());
-
-        List groovyObjectMethods = getInheritedMethods(GroovyObject.class, new ArrayList());
-
         // add interface methods
-        ArrayList interfaceMethods = new ArrayList();
+        List interfaceMethods = new ArrayList();
         for (int i = 0; i < interfacesToImplement.size(); i++) {
             Class thisInterface = (Class) interfacesToImplement.get(i);
             getInheritedMethods(thisInterface, interfaceMethods);
@@ -276,7 +293,7 @@ public class ProxyGenerator {
                 addWrappedCall(buffer, method, map);
             }
         }
-        ArrayList additionalMethods = getInheritedMethods(delegate.getClass(), new ArrayList());
+        List additionalMethods = getInheritedMethods(delegate.getClass(), new ArrayList());
         for (int i = 0; i < additionalMethods.size(); i++) {
             Method method = (Method) additionalMethods.get(i);
             if (method.getName().indexOf('$') != -1)
@@ -317,7 +334,7 @@ public class ProxyGenerator {
 
     private void addWrappedCall(StringBuffer buffer, Method method, Map map) {
         if (map.containsKey(method.getName())) {
-            addOverridingMapCall(buffer, method);
+            addOverridingMapCall(buffer, method, false);
         } else {
             Class[] parameterTypes = addMethodPrefix(buffer, method);
             addWrappedMethodBody(buffer, method, parameterTypes);
@@ -325,9 +342,8 @@ public class ProxyGenerator {
         }
     }
 
-    private boolean containsEquivalentMethod(List publicAndProtectedMethods, Method candidate) {
-        for (int i = 0; i < publicAndProtectedMethods.size(); i++) {
-            Method method = (Method) publicAndProtectedMethods.get(i);
+    private boolean containsEquivalentMethod(Collection<Method> publicAndProtectedMethods, Method candidate) {
+        for (Method method : publicAndProtectedMethods) {
             if (candidate.getName().equals(method.getName()) &&
                     candidate.getReturnType().equals(method.getReturnType()) &&
                     hasMatchingParameterTypes(candidate, method)) {
@@ -347,7 +363,7 @@ public class ProxyGenerator {
         return true;
     }
 
-    private ArrayList getInheritedMethods(Class baseClass, ArrayList methods) {
+    private List<Method> getInheritedMethods(Class baseClass, List<Method> methods) {
         methods.addAll(DefaultGroovyMethods.toList(baseClass.getMethods()));
         Class currentClass = baseClass;
         while (currentClass != null) {
@@ -369,18 +385,24 @@ public class ProxyGenerator {
                 .append("        this.@closureMap['").append(methodName).append("'] (*args)\n    }\n");
     }
 
-    private void addOverridingMapCall(StringBuffer buffer, Method method) {
+    private void addOverridingMapCall(StringBuffer buffer, Method method, boolean closureIndicator) {
         Class[] parameterTypes = addMethodPrefix(buffer, method);
-        addMethodBody(buffer, method, parameterTypes);
+        addMethodBody(buffer, closureIndicator ? "*" : method.getName(), parameterTypes);
         addMethodSuffix(buffer);
     }
 
     private void addMapOrDummyCall(Map map, StringBuffer buffer, Method method) {
         Class[] parameterTypes = addMethodPrefix(buffer, method);
         if (map.containsKey(method.getName())) {
-            addMethodBody(buffer, method, parameterTypes);
+            addMethodBody(buffer, method.getName(), parameterTypes);
+        } else if (!emptyMethods) {
+            addUnsupportedBody(buffer);
         }
         addMethodSuffix(buffer);
+    }
+
+    private void addUnsupportedBody(StringBuffer buffer) {
+        buffer.append("throw new UnsupportedOperationException()");
     }
 
     private Class[] addMethodPrefix(StringBuffer buffer, Method method) {
@@ -399,8 +421,8 @@ public class ProxyGenerator {
         return parameterTypes;
     }
 
-    private void addMethodBody(StringBuffer buffer, Method method, Class[] parameterTypes) {
-        buffer.append("this.@closureMap['").append(method.getName()).append("'] (");
+    private void addMethodBody(StringBuffer buffer, String method, Class[] parameterTypes) {
+        buffer.append("this.@closureMap['").append(method).append("'] (");
         for (int j = 0; j < parameterTypes.length; j++) {
             if (j != 0) {
                 buffer.append(", ");

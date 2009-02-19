@@ -22,9 +22,9 @@ import org.codehaus.groovy.runtime.DefaultGroovyMethods;
 import org.codehaus.groovy.runtime.DefaultGroovyStaticMethods;
 import org.codehaus.groovy.vmplugin.VMPluginFactory;
 import org.codehaus.groovy.util.FastArray;
+import org.codehaus.groovy.util.ManagedLinkedList;
+import org.codehaus.groovy.util.ReferenceBundle;
 
-import java.lang.ref.ReferenceQueue;
-import java.lang.ref.WeakReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -32,7 +32,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A registry of MetaClass instances which caches introspection &
@@ -54,8 +53,7 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
     private FastArray staticMethods = new FastArray();
 
     private LinkedList changeListenerList = new LinkedList();
-    private LinkedList metaClassInfo = new LinkedList();
-    private ReferenceQueue queue = new ReferenceQueue();
+    private ManagedLinkedList metaClassInfo = new ManagedLinkedList<MetaClass>(ReferenceBundle.getWeakBundle());
 
     public static final int LOAD_DEFAULT = 0;
     public static final int DONT_LOAD_DEFAULT = 1;
@@ -110,7 +108,7 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
         addMetaClassRegistryChangeEventListener(new MetaClassRegistryChangeEventListener(){
             public void updateConstantMetaClass(MetaClassRegistryChangeEvent cmcu) {
                 synchronized (metaClassInfo) {
-                    metaClassInfo.add(new WeakReference(cmcu.getNewMetaClass(),queue));
+                   metaClassInfo.add(cmcu.getNewMetaClass());
                 }
             }
         });
@@ -138,7 +136,7 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
         CachedMethod[] methods = ReflectionCache.getCachedClass(theClass).getMethods();
 
         if (useMethodrapper) {
-            // Here we instanciate objects representing MetaMethods for DGM methods.
+            // Here we instantiate objects representing MetaMethods for DGM methods.
             // Calls for such meta methods done without reflection, so more effectively.
             // It gives 7-8% improvement for benchmarks involving just several ariphmetic operations
             for (int i = 0; ; ++i) {
@@ -225,7 +223,7 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
             info.unlock();
         }
 
-        if (oldMc==mc) fireConstantMetaClassUpdate(theClass,newMc);
+        if (oldMc!=mc) fireConstantMetaClassUpdate(theClass,newMc);
     }
     
     public void removeMetaClass(Class theClass) {
@@ -312,25 +310,6 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
         }
     }
 
-    
-    private void cleanMetaClassList() {
-        boolean hasCollectedEntries=false;
-        java.lang.ref.Reference r=null;
-        while ((r=queue.poll())!=null) {
-            r.clear();
-            hasCollectedEntries=true;
-        }
-
-        if (!hasCollectedEntries) return;
-
-        for (Iterator it = metaClassInfo.iterator(); it.hasNext();) {
-            WeakReference ref = (WeakReference) it.next();
-            if (ref.get()!=null) continue;
-            it.remove();
-            ref.clear();
-        }
-    }
-
     /**
      * Causes the execution of all registered listeners. This method is used mostly
      * internal to kick of the listener notification. It can also be used by subclasses
@@ -395,14 +374,13 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
      * @return the iterator.
      */    
     public Iterator iterator() {
-        final WeakReference[] refs;
+        final MetaClass[] refs;
         synchronized (metaClassInfo) {
-            cleanMetaClassList();
-            refs = (WeakReference[]) metaClassInfo.toArray(new WeakReference[0]);
+            refs = (MetaClass[]) metaClassInfo.toArray(new MetaClass[0]);
         }
         
         return new Iterator() {
-        	// index inn the ref array
+        	// index in the ref array
             private int index=0;
             // the current meta class
             private MetaClass currentMeta;
@@ -416,14 +394,8 @@ public class MetaClassRegistryImpl implements MetaClassRegistry{
             	hasNextCalled = true;
             	hasNext=true;
             	
-            	// currentMeta==null means the entry might have been
-            	// collected already, we skip these.
-                currentMeta=null;
-                while (currentMeta==null && index<refs.length) {
-                    currentMeta = (MetaClass) refs[index].get();
-                    index++;
-                }
-                hasNext=currentMeta!=null;
+                currentMeta= refs[index];
+                index++;
                 return hasNext;
             }
             

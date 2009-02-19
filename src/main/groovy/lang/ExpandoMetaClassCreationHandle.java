@@ -16,19 +16,13 @@
 package groovy.lang;
 
 import groovy.lang.MetaClassRegistry.MetaClassCreationHandle;
-import org.codehaus.groovy.reflection.CachedClass;
 import org.codehaus.groovy.reflection.ClassInfo;
-import org.codehaus.groovy.runtime.GeneratedClosure;
-import org.codehaus.groovy.runtime.metaclass.ClosureMetaClass;
-
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * <p>A handle for the MetaClassRegistry that changes all classes loaded into the Grails VM
  * to use ExpandoMetaClass instances
  *
- * <p>The handle should be registered with the Groovy runtime <strong>before</before> Groovy loads, for example
+ * <p>The handle should be registered with the Groovy runtime <strong>before</strong> Groovy loads, for example
  * in your main method.
  *
  * <code>GroovySystem.metaClassRegistry.metaClassCreationHandle = new ExpandoMetaClassCreationHandle()</code>
@@ -38,7 +32,7 @@ import java.util.Set;
  * @see org.codehaus.groovy.runtime.metaclass.MetaClassRegistryImpl#setMetaClassCreationHandle(groovy.lang.MetaClassRegistry.MetaClassCreationHandle)
  *
  * @author Graeme Rocher
- * @since 1.1
+ * @since 1.5
  */
 public class ExpandoMetaClassCreationHandle extends MetaClassCreationHandle {
 
